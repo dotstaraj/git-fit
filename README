@@ -1,0 +1,100 @@
+
+
+
+INTRODUCTION
+
+git-fit helps your git repo stay fit and slim and keep git commands running fast. It lets you offload bloat (large and/or binary files) away from the repo and into some external location, committing instead only a single, small file with pointers into the external location. Integration with git through hooks, fit takes care of most things automatically behind the scenes. Other than that, there are only three commands you need to know in order to stay fit. ALL of these commands operate only on the HEAD revision that the repository currently points to. The commands, with the full set of options, are:
+
+    git fit [--hard-reset] [<paths>...]
+    Just "git fit" without any sub-command will show the state of any uncommited changes and any detected problems. During any "git commit" that's done on the repository, fit will automatically update the commit to properly associate it with these changes to fit-managed items.
+    The "--hard-reset" option will irreversibly discard all uncommitted changes to your fit-managed items, bringing your working directory to a pristine condition. So use this option with caution.
+    
+    git fit get [-f] [<paths>...]
+    Without the -f option, "git fit get" will show the items for the current HEAD commit that need to be copied from the external location to the repository (if the item already exists in fit's local cache, it will be silently copied to its location). Use the -f option to actually begin the download of the missing, uncached items. Until this is done, any action in your project that requires the actual contents of these items will not work as expected.
+    
+    git fit put [-f] [<paths>...]
+    Without the -f option, "git fit put" will show the items for the current HEAD commit that still need to be copied to the external location from the repository. Use the -f option to actually begin the upload of those items. Until this is done, people who are using your commits will not have access to these items.
+
+
+OTHER TOOLS
+
+There are other tools that are designed to solve the same problem. The following tools have varying features/functionalities and all use git's clean and smudge filters to seamlessly integrate with git commands.
+
+git-exile
+git-bin
+git-fat
+git-media
+
+However, git's clean/smudge filters force each filtered item to be fully read in from stdin and the transformations to be written to stdout. The side-effect is that these filters end up causing some basic and frequent git commands (such as status) to become really slow, countering the problem the tools were intended to help with in the first place. A small experiment will show that a super simple "clean = cat" filter applied to a directory containing about 200MB of images can cause git status to run 7x slower than without the filter applied (about 4.3s versus 0.6s). Besides this, there are other issues with some of the tools, like too many dependencies, inflexible storage locations, inactivity/abandonment, etc. If git's clean/smudge filters did work efficiently though, then git-exile would probably be the best choice, and git-fit would probably have not been written. (There is also the git-annex tool and it does not currently use clean and smudge filters, but it has other major differences with the design goals of git-fit.)
+
+
+
+HOW IT WORKS
+
+Unlike the tools above, the only way git-fit transparently integrates with the git system is through hooks (and not through clean/smudge filters). So, unless it is invoked through any of the three commands, fit will just stay out of your way until commit or checkout. The trade-off resulting from this alternative setup is that that commands like git status or git diff will not be directly aware of the true state of fit-managed items. git-fit sacrifices this convenience in favor of speed and efficiency.
+
+What fit will handle
+(1) Items you've told fit to track.
+See "Configuration" below. Fit will detect changes in these items and offload them to your specified external location.
+
+(2) Untracked large or binary files that are staged for commit into git
+Any binary file or large text file (>100K) that fit has not been told about will abort any attempted commit that includes those items as new additions. Fit must be told either to ignore these items or to track them. This enforcement is a feature intended to prevent accidental commits of items that should actually be handled by fit.
+
+What fit will NOT handle
+(1) Items you've told fit to ignore.
+See "Configuration" below. Fit will just pretend these items are not there.
+
+(2) Items committed to the repo and tracked by git
+Fit will never touch items that are already being tracked by git, no exceptions. Item being tracked by fit somehow committed into git repo? Fit will stop tracking it. There's an item already committed to git, and you're now asking fit to handle it? Well, it won't. For fit to handle something the first requirement is that it not be already tracked by git. If there is such an item and you need fit to handle, it must first be untracked from git by doing something like "git remove".
+
+
+CONFIGURATION
+Initial one-time setup
+Initial set-up to enable git-fit on your repo requires two steps:
+(NOTE: do not run "git fit" if any of the following git hooks are enabled and being used for your repo: pre-commit, post-commit, post-checkout, or pre-push. See more details below. )
+    
+    (1) Add git-fit to your PATH
+    (2) Run "git fit" inside your repo
+
+The first time "git fit" is run inside a repo, it initializes it. Everytime thereafter, it shows the status.
+
+Instructing fit with include/exclude rules
+Once initial setup is complete, you need to sprinkle .gitattributes and .gitignore files around your working tree (or update them), depending on which files you need to include or exclude from git-fit. See the gitignore help page to learn how to specify patterns to match and select files (.gitattributes files use the same pattern syntax as .gitignore files). Here is a simple, common use-case example, which will include all PNG images in the directory and its sub-directories to be handled by git-fit:
+
+*.png fit
+
+To explicitly exclude files from fit, you would have in .gitattributes something like the following (notice the minus sign prefixed to the "fit" attribute):
+
+*.jar -fit
+
+This would allow all the jar files in the directory to be ignored by fit and committed through the normal git commit flow if desired, and fit will not complain about these items even though they are binary and may be large.
+
+-----------
+* Note about existing git hooks in your repo:
+If you already have an existing pre-commit hook doing other checks, setup might be a little less straightforward. In general, any pre-commit hook should eventually terminate with a zero or non-zero exit code, indicating whether the commit is to be accepted or rejected, respectively. If the hook is running multiple checks, then the first check that fails (if any) should cause the hook to immediately exit with a non-zero code. Assuming your existing pre-commit is behaving this way, then git-fit/bin/pre-commit is just another check in the list that you can add. You can call it from your existing pre-commit hook and use its exit code to decide what to do next in the hook script.
+
+=================
+
+
+1. For any files that you want to offload away from the repo into an external location, you need to come up with a .gitignore-style pattern to specify those set of files, and then do both of the following:
+
+    - Tell git to ignore those files (through a pattern in a .gitignore file)
+    - Tell fit to handle those files (through the *same* pattern in an analogous .gitattribute file)
+
+This effectively creates a virtual partitioning over your single physical working tree. One partition is what git sees, and the other partition is what fit sees. The patterns you specify in 
+
+
+WORKFLOW
+SELECT the set of files that need to be offloaded by fit. Tell fit to handle them and by tell git to ignore them.
+CHECKIN any changes for fit-managed files into git-fit.
+ADD only the .gitignore and .gitattributes files to you git staging area.
+COMMIT your changes.
+CHECKOUT
+REPEAT.
+
+
+
+==========
+
+The link between these two partitions is a .gitfit file that is committed into the actual repository and contains all the metadata about all the files in fit's partition.
+

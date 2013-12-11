@@ -1,0 +1,84 @@
+#!/usr/bin/env python2.7
+
+import argparse
+from sys import argv, path
+from os.path import dirname, realpath, join
+path.append(join(dirname(realpath(__file__)), 'bin')
+from fit import repoDir, readFitFile, getcwd, chdir
+import status, hooks, s3
+
+
+helpMsg='''
+git fit [--hard-reset] [<paths>...]
+
+Just "git fit" without any sub-command will show the state of any uncommited changes and
+any detected problems. During any "git commit" that's done on the repository, fit will
+automatically update the commit to properly associate it with these changes to fit-managed
+items. The "--hard-reset" option will irreversibly discard all uncommitted changes to your
+fit-managed items, bringing your working directory to a pristine condition (so use this
+option with caution).
+
+
+git fit get [-f] [<paths>...]
+
+Without the -f option, "git fit get" will show the items for the current HEAD commit that
+need to be copied from the external location to the repository (if the item already exists
+in fit's local cache, it will be silently copied to its location). Use the -f option to
+actually begin the download of the missing, uncached items. Until this is done, any action
+in your project that requires the actual contents of these items will not work as
+expected.
+
+
+git fit put [-f] [<paths>...]
+
+Without the -f option, "git fit put" will show the items for the current HEAD commit that
+still need to be copied to the external location from the repository. Use the -f option to
+actually begin the upload of those items. Until this is done, people who are using your
+commits will not have access to these items.
+'''
+
+def runFromToplevel(callback, *opts):
+    fitTrackedData = readFitFile()
+    cwd = getcwd()
+    chdir(repoDir)
+    
+    callback(fitTrackedData, *opts)
+    
+    chdir(cwd)
+
+if __name__ == '__main__':
+    if len(argv) > 1:
+        if argv[1] in ('-h', '--help'):
+            print helpMsg
+            exit(1)
+        
+        argv1 = argv[1]
+        if argv1.startswith('--run-hook-'):
+            hookName = argv1[11:]
+            if hookName in ('postCheckout', 'preCommit', 'postCommit'):
+                runFromToplevel(getattr(hooks, hookName))
+        elif argv1 in ('get', 'put'):
+            parser = argparse.ArgumentParser(prog='fit ' + argv1)
+            parser.add_argument('-f', action='store_true')
+            parser.add_argument('paths', nargs='*')
+            opts = parser.parse_args(argv[2:])
+            runFromToplevel(getattr(s3, argv1), opts)
+    else:
+        status.printStatus()
+
+'''
+fit.repo git-config
+
+
+init
+- echo .fit -fit >> gitDir/info/attributes
+- echo .fit >> gitDir/info/excludes
+- mkdir gitDir/fit/objects
+- gitDir/hooks ...
+
+git ls-tree -lr --full-tree HEAD |
+awk '$2 == "blob" {print $3"\t"$4"\t"$5}' |
+gzip > .gitfit
+
+'''
+
