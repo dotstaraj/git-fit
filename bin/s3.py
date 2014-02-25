@@ -15,8 +15,18 @@ class _ProgressPrinter:
         print '\rProgress: %6.2f%% overall      %6.2f%% %s'%(float(self.done+done)/self.size*100, float(done)/size*100, self.itemName),(' '*20)+('\b'*20),
         stdout.flush()
 
+_s3keys_from_odin_cmd='''
+python -c "
+from json import load as loadjson
+from base64 import b64decode
+from urllib2 import urlopen
+print b64decode(loadjson(urlopen('http://localhost:2009/query?Operation=retrieve&ContentType=JSON&material.materialName=com.amazon.access.krew-dev-krew-dev-1&material.materialType=Principal'))['material']['materialData'])
+print b64decode(loadjson(urlopen('http://localhost:2009/query?Operation=retrieve&ContentType=JSON&material.materialName=com.amazon.access.krew-dev-krew-dev-1&material.materialType=Credential'))['material']['materialData'])
+"
+'''
+
 # From http://w.amazon.com/index.php/Odin/UsersGuide/Examples/ShellExample
-_s3keys_from_odin_cmd=r'''
+r'''
 set -e && \
 curl -s "http://localhost:2009/query?Operation=retrieve&ContentType=JSON&material.materialName=com.amazon.access.krew-dev-krew-dev-1&material.materialType=Principal" \
     | tr '{},' '\n\n\n' \
@@ -29,7 +39,7 @@ curl -s "http://localhost:2009/query?Operation=retrieve&ContentType=JSON&materia
     | base64 -di; echo
 '''
 def _getBucket():
-    keys = popen(['ssh', 'krew.aka.amazon.com', _s3keys_from_odin_cmd], stdout=PIPE).communicate()[0].split()
+    keys = popen(['ssh', 'ankujain-2.desktop.amazon.com', _s3keys_from_odin_cmd], stdout=PIPE).communicate()[0].split()
     return s3(*keys).get_bucket('krew-git-fit')
 
 
