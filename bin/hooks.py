@@ -47,13 +47,13 @@ def preCommit(fitTrackedData):
 
         exit(1)
 
-    added, missing, untracked, modified = getChangedItems()
+    added, removed, modified, untracked = getChangedItems()
 
     sizes = [s.st_size for s in [stat(f) for f in added]]
     p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
     added =  zip(added, zip(p.communicate('\n'.join(added))[0].strip().split('\n'), sizes))
 
-    for i in missing:
+    for i in removed:
         del fitTrackedData[i]
     for i in untracked:
         del fitTrackedData[i]

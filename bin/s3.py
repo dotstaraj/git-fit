@@ -1,9 +1,7 @@
-from fit import getStagedOffenders, getChangedItems, cacheDir, fitDir, selfDir
+from fit import cacheDir, fitDir, selfDir
 from fit import PIPE, popen, path
 from shutil import copyfile, move
 from sys import stdout, path as syspath
-syspath.append(path.join(selfDir, '../s3')) # so that boto can be imported
-from boto.s3.connection import S3Connection as s3
 
 _TRANSFER_CHUNK_SIZE = 102400
 class _ProgressPrinter:
@@ -25,29 +23,26 @@ print b64decode(loadjson(urlopen('http://localhost:2009/query?Operation=retrieve
 "
 '''
 
-# From http://w.amazon.com/index.php/Odin/UsersGuide/Examples/ShellExample
-r'''
-set -e && \
-curl -s "http://localhost:2009/query?Operation=retrieve&ContentType=JSON&material.materialName=com.amazon.access.krew-dev-krew-dev-1&material.materialType=Principal" \
-    | tr '{},' '\n\n\n' \
-    | sed -n 's/"materialData":"\(.*\)"/\1/p' \
-    | base64 -di; echo \
-&& \
-curl -s "http://localhost:2009/query?Operation=retrieve&ContentType=JSON&material.materialName=com.amazon.access.krew-dev-krew-dev-1&material.materialType=Credential" \
-    | tr '{},' '\n\n\n' \
-    | sed -n 's/"materialData":"\(.*\)"/\1/p' \
-    | base64 -di; echo
-'''
+S3Connection = None
 def _getBucket():
+    global S3Connection
+    if not S3Connection:
+        # importing boto library adds on a huge chunk of startup time for
+        # every invocation of fit, so import it only right before we ever
+        # actually need it
+        syspath.append(path.join(selfDir, '../s3'))
+        from boto.s3.connection import S3Connection as s3conn
+        S3Connection = s3conn
+
     keys = popen(['ssh', 'ankujain-2.desktop.amazon.com', _s3keys_from_odin_cmd], stdout=PIPE).communicate()[0].split()
-    return s3(*keys).get_bucket('krew-git-fit')
+    return S3Connection(*keys).get_bucket('krew-git-fit')
 
 
 def get(fitTrackedData, opts):
     need = []
     missing = []
     
-    bucket = getBucket()
+    bucket = _getBucket()
     
     for filePath,(objHash, size) in fitTrackedData.iteritems():
         if path.exists(filePath) and path.getsize(filePath) == 0:

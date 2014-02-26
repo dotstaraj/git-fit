@@ -3,7 +3,7 @@
 import argparse
 from sys import argv, path
 from os.path import dirname, realpath, join
-path.append(join(dirname(realpath(__file__)), 'bin')
+path.append(join(dirname(realpath(__file__)), 'bin'))
 from fit import repoDir, readFitFile, getcwd, chdir
 import status, hooks, s3
 
@@ -53,13 +53,17 @@ if __name__ == '__main__':
             exit(1)
         
         argv1 = argv[1]
+
+        # Checks for the undocumented --run-hook-* argument. We use this
+        # to place simple one-line commands like "git fit --run-hook-preCommit"
+        # into the git hook scripts
         if argv1.startswith('--run-hook-'):
             hookName = argv1[11:]
             if hookName in ('postCheckout', 'preCommit', 'postCommit'):
                 runFromToplevel(getattr(hooks, hookName))
         elif argv1 in ('get', 'put'):
             parser = argparse.ArgumentParser(prog='fit ' + argv1)
-            parser.add_argument('-f', action='store_true')
+            parser.add_argument('-f', '--transfer', action='store_true')
             parser.add_argument('paths', nargs='*')
             opts = parser.parse_args(argv[2:])
             runFromToplevel(getattr(s3, argv1), opts)
