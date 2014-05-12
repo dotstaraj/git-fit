@@ -1,57 +1,76 @@
-from fit import getStagedOffenders, getChangedItems, fitFile, writeFitFile
-from fit import PIPE, popen, stat, path
+from fit import getStagedOffenders, getChangedItems, gitDirOperation
+from fit import fitFile, fitFileCopy, writeFitFile, readFitFile, repoDir
+from objects import findObject, placeObject
+from subprocess import PIPE, Popen as popen
 from textwrap import fill as wrapline
-from os import mkdir
+from os import makedirs, stat, path, remove
 from shutil import copyfile
 
+@gitDirOperation(repoDir)
 def postCheckout(fitTrackedData):
+    lastFitTrackedData = readFitFile(fileToRead=fitFileCopy)
+    p = popen(('git ls-files -o').split(), stdout=PIPE)
+    nonGitItems = p.communicate()[0].strip().split('\n')
+    itemsToRemove = (set(lastFitTrackedData) - set(fitTrackedData)) & set(nonGitItems)
+    for i in itemsToRemove:
+        remove(i)
+    
+    missing = 0
     for filePath,(objHash, size) in fitTrackedData.iteritems():
-        objPath = path.join(cacheDir, objHash[:2], objHash[2:])
-        path.exists(objPath) and copyfile(objPath, filePath) or open(filePath, 'w').close()
+        objPath = findObject(objHash)
+        fileDir = path.dirname(filePath)
+        fileDir and (path.exists(fileDir) or makedirs(fileDir))
+        if objPath:
+            copyfile(objPath, filePath)
+        else:
+            open(filePath, 'w').close()  #write a 0-byte file as placeholder
+            missing += 1
+    if missing > 0:
+        print '* git-fit: %d fit objects are not cached and must be downloaded for this commit.'%missing
+        print '* To download them, run "git fit --get -f".'
+        print '* Optionally, provide paths to this command to selectively download the objects you want.'
+
+    writeFitFile(fitTrackedData)
 
 def postCommit(fitTrackedData):
+    print 'Caching objects for committed fit items...',
     for filePath,(objHash, size) in fitTrackedData.iteritems():
-        objDir = path.join(cacheDir,objHash[:2])
-        objPath = path.join(cacheDir, objDir, objHash[2:])
-        path.exists(objDir) or mkdir(objDir)
-        path.exists(objPath) or path.getsize(filePath) == 0 or copyfile(filePath, objPath)
+        placeObject(objHash, filePath) if not findObject(objHash) else None
+    print 'Done.'
 
 # This msg string should be left exactly as it is in the multi-line string
-infoMsg='''\
+infoMsg='''
 ********** git-fit has aborted this commit **********
-The commit was aborted due to the following items in the staging area:
+The commit was aborted because the following items are staged in git:
 
 <files-will-be-output-here>
 
 F = explicitly included for git-fit through "fit" attribute
 B = auto-detected binary file
-L = auto-detected large text file (>100K)
 
-This repository is configured to use git-fit. Any large and/or binary files that fit has \
-not been told about will abort the commit.
-********** git-fit has aborted this commit **********\
+This repository is configured to use git-fit. Any binary files that fit \
+has not been told about will abort the commit.
+********** git-fit has aborted this commit **********
 '''.split('\n')
 
 def preCommit(fitTrackedData):
     offenders = getStagedOffenders()
     if any(len(l) > 0 for l in offenders):
-        if __name__ == '__main__':
-            conflict = [('F', i) for i in offenders[0]]
-            binary = [('B', i) for i in offenders[1]]
-            large = [('L', i) for i in offenders[2]]
-            
-            print '\n'.join([wrapline(l) for l in infoMsg[:3]])
-            for c,f in sorted(conflict+binary+large, key=lambda i: i[1]):
-                print '   ', c, f
-            print '\n'.join([wrapline(l) for l in infoMsg[4:]])
+        conflict = [('F ', i) for i in offenders[0]]
+        binary = [('B ', i) for i in offenders[1]]
+        
+        print '\n'.join([wrapline(l) for l in infoMsg[:4]])
+        for c,f in sorted(conflict+binary, key=lambda i: i[1]):
+            print '   ', c, f
+        print '\n'.join([wrapline(l) for l in infoMsg[5:]])
 
         exit(1)
 
-    added, removed, modified, untracked = getChangedItems()
+    modified, added, removed, untracked = getChangedItems(fitTrackedData)
 
     sizes = [s.st_size for s in [stat(f) for f in added]]
     p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
-    added =  zip(added, zip(p.communicate('\n'.join(added))[0].strip().split('\n'), sizes))
+    added = zip(added, zip(p.communicate('\n'.join(added))[0].strip().split('\n'), sizes))
 
     for i in removed:
         del fitTrackedData[i]

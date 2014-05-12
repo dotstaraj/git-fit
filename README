@@ -3,18 +3,38 @@
 
 INTRODUCTION
 
-git-fit helps your git repo stay fit and slim and keep git commands running fast. It lets you offload bloat (large and/or binary files) away from the repo and into some external location, committing instead only a single, small file with pointers into the external location. Integration with git through hooks, fit takes care of most things automatically behind the scenes. Other than that, there are only three commands you need to know in order to stay fit. ALL of these commands operate only on the HEAD revision that the repository currently points to. The commands, with the full set of options, are:
+git-fit helps your git repo stay fit and slim and keep git commands running fast. It lets you offload bloat (binary files) away from the repo and into some external location, committing instead only a single, small file with pointers into the external location. Integration with git through hooks, fit takes care of most things automatically behind the scenes. Other than that, there are only the below few commands you need to know in order to stay fit. ALL of these commands operate only on the HEAD revision that the repository currently points to. The commands, with the full set of options, are:
 
-    git fit [--hard-reset] [<paths>...]
-    Just "git fit" without any sub-command will show the state of any uncommited changes and any detected problems. During any "git commit" that's done on the repository, fit will automatically update the commit to properly associate it with these changes to fit-managed items.
-    The "--hard-reset" option will irreversibly discard all uncommitted changes to your fit-managed items, bringing your working directory to a pristine condition. So use this option with caution.
-    
-    git fit get [-f] [<paths>...]
-    Without the -f option, "git fit get" will show the items for the current HEAD commit that need to be copied from the external location to the repository (if the item already exists in fit's local cache, it will be silently copied to its location). Use the -f option to actually begin the download of the missing, uncached items. Until this is done, any action in your project that requires the actual contents of these items will not work as expected.
-    
-    git fit put [-f] [<paths>...]
-    Without the -f option, "git fit put" will show the items for the current HEAD commit that still need to be copied to the external location from the repository. Use the -f option to actually begin the upload of those items. Until this is done, people who are using your commits will not have access to these items.
+git fit [--legend] [<paths>...]
 
+Show the fit state of the working copy and any detected problems. For any "git commit"
+issued on the working copy, fit will automatically update the commit to properly associate
+it with any changes to fit-managed items. Use the --legend option to not print an
+explanatory legend with status symbol meanings.
+
+git fit --restore
+
+The "--restore" option will irreversibly discard all uncommitted changes to your
+fit-managed items, bringing your working directory to a pristine condition (so use this
+option with caution). In other words, whatever changes you see in the "git fit" status
+output before running --restore, you will no longer see after running --restore.
+
+git fit --get [-f] [<paths>...]
+
+Without the -f option, "git fit --get" will show the items for the current HEAD commit that
+need to be copied from the external location to the repository (if the item already exists
+in fit's local cache, it will be silently copied to its location). Use the -f option to
+actually begin the download of the missing, uncached items. Until this is done, any action
+in your project that requires the actual contents of these items will not work as
+expected.
+
+
+git fit --put [-f]
+
+Without the -f option, "git fit --put" will show the items for the current HEAD commit that
+still need to be copied to the external location from the repository. Use the -f option to
+actually begin the upload of those items. Until this is done, people who are using your
+commits will not have access to these items.
 
 OTHER TOOLS
 
@@ -37,21 +57,21 @@ What fit will handle
 (1) Items you've told fit to track.
 See "Configuration" below. Fit will detect changes in these items and offload them to your specified external location.
 
-(2) Untracked large or binary files that are staged for commit into git
-Any binary file or large text file (>100K) that fit has not been told about will abort any attempted commit that includes those items as new additions. Fit must be told either to ignore these items or to track them. This enforcement is a feature intended to prevent accidental commits of items that should actually be handled by fit.
+(2) Untracked binary files that are staged for commit into git
+Any binary file that fit has not been told about will abort any attempted commit that includes those items as new additions. Fit must be told either to ignore these items or to track them. This enforcement is a feature intended to prevent accidental commits of items that should actually be handled by fit.
 
 What fit will NOT handle
 (1) Items you've told fit to ignore.
 See "Configuration" below. Fit will just pretend these items are not there.
 
 (2) Items committed to the repo and tracked by git
-Fit will never touch items that are already being tracked by git, no exceptions. Item being tracked by fit somehow committed into git repo? Fit will stop tracking it. There's an item already committed to git, and you're now asking fit to handle it? Well, it won't. For fit to handle something the first requirement is that it not be already tracked by git. If there is such an item and you need fit to handle, it must first be untracked from git by doing something like "git remove".
+Fit will NEVER touch items that have already been committed into git, never, no exceptions. Item being tracked by fit somehow committed into git repo? Fit will stop tracking it. There's an item already committed to git, and you're now asking fit to handle it? Well, it won't. For fit to handle something the first requirement is that it not be already tracked by git. If there is such an item and you need fit to handle, it must first be untracked from git by doing something like "git remove".
 
 
 CONFIGURATION
 Initial one-time setup
 Initial set-up to enable git-fit on your repo requires two steps:
-(NOTE: do not run "git fit" if any of the following git hooks are enabled and being used for your repo: pre-commit, post-commit, post-checkout, or pre-push. See more details below. )
+(NOTE: do not run "git fit" if any of the following git hooks are enabled and being used for your repo: pre-commit, post-commit, or post-checkout. See more details below. )
     
     (1) Add git-fit to your PATH
     (2) Run "git fit" inside your repo
@@ -67,34 +87,9 @@ To explicitly exclude files from fit, you would have in .gitattributes something
 
 *.jar -fit
 
-This would allow all the jar files in the directory to be ignored by fit and committed through the normal git commit flow if desired, and fit will not complain about these items even though they are binary and may be large.
+This would allow all the jar files in the directory to be ignored by fit and committed through the normal git commit flow if desired, and fit will not complain about these items even though they are binary.
 
 -----------
 * Note about existing git hooks in your repo:
 If you already have an existing pre-commit hook doing other checks, setup might be a little less straightforward. In general, any pre-commit hook should eventually terminate with a zero or non-zero exit code, indicating whether the commit is to be accepted or rejected, respectively. If the hook is running multiple checks, then the first check that fails (if any) should cause the hook to immediately exit with a non-zero code. Assuming your existing pre-commit is behaving this way, then git-fit/bin/pre-commit is just another check in the list that you can add. You can call it from your existing pre-commit hook and use its exit code to decide what to do next in the hook script.
-
-=================
-
-
-1. For any files that you want to offload away from the repo into an external location, you need to come up with a .gitignore-style pattern to specify those set of files, and then do both of the following:
-
-    - Tell git to ignore those files (through a pattern in a .gitignore file)
-    - Tell fit to handle those files (through the *same* pattern in an analogous .gitattribute file)
-
-This effectively creates a virtual partitioning over your single physical working tree. One partition is what git sees, and the other partition is what fit sees. The patterns you specify in 
-
-
-WORKFLOW
-SELECT the set of files that need to be offloaded by fit. Tell fit to handle them and by tell git to ignore them.
-CHECKIN any changes for fit-managed files into git-fit.
-ADD only the .gitignore and .gitattributes files to you git staging area.
-COMMIT your changes.
-CHECKOUT
-REPEAT.
-
-
-
-==========
-
-The link between these two partitions is a .gitfit file that is committed into the actual repository and contains all the metadata about all the files in fit's partition.
 

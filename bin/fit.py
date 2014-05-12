@@ -1,7 +1,7 @@
 from subprocess import Popen as popen, PIPE
 from os import stat, path, chdir, getcwd
 from gzip import open as gz
-from cPickle import load, dump
+from json import load, dump
 from sys import argv
 
 # Get the repo root directory if inside one, otherwise exit
@@ -14,33 +14,83 @@ selfDir = path.dirname(path.realpath(__file__))
 gitDir = popen('git rev-parse --git-dir'.split(), stdout=PIPE).communicate()[0].strip()
 fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')
+fitFileCopy = path.join(fitDir, 'fitFileCopy')
 cacheDir = path.join(fitDir, 'objects')
+syncDir = path.join(cacheDir, 'tosync')
 statFile = path.join(fitDir, 'stat')
 
-def readFitFile():
-    return load(gz(fitFile)) if path.exists(fitFile) else {}
+# Parameterized decorator that will wrap the decoratee with a cd into the git directory
+# before running the operation, and a cd back into the starting directory afterwards.
+# The parameterized form should be used for methods that that are not class members or
+# to tell the decorator to use a specific directory as the git directory. The basic
+# form should be used only for class member methods where the class also has a
+# string self.gitDir member.
+def gitDirOperation(arg):
+    # "arg" will be either a callable, or a string, depending on how the decorator is used.
+    # If the decorator is used as @gitDirOperation, it is used in the basic way and is NOT
+    # parameteried. It is parameterized if called with a string, such as
+    # @gitDirOperatio('path/gitFolder'). How we get the git directory depends on which
+    # form of the decorator is used.
+
+    isParameterized = isinstance(arg, basestring)
+    getDir = (lambda s: arg) if isParameterized else (lambda s: s[0].gitDir)
+
+    # Assume non-parameterized form by default. If actually the parameterized form
+    # is used, than wrapper() will set decoratee to the passed-in function, which
+    # is the actual decoratee
+    decoratee = [arg]
+
+    def decorator(*args, **kwargs):
+        cwd = getcwd()
+        chdir(getDir(args))
+
+        retval = decoratee[0](*args, **kwargs)
+
+        chdir(cwd)
+        return retval
+
+    def wrapper(func):
+        decoratee[0] = func
+        return decorator
+
+    return wrapper if isParameterized else decorator
+
+def _fitStats(filename):
+    stats = stat(filename)
+    return stats.st_size, stats.st_mtime, stats.st_ctime, stats.st_ino
+
+# The fit file is gzipped Python-pickled dictionary of this form:
+#   {filename --> hash,size}
+#
+def readFitFile(fileToRead=fitFile):
+    #return load(gz(fitFile)) if path.exists(fitFile) else {}
+    return load(open(fileToRead)) if path.exists(fileToRead) else {}
 
 def writeFitFile(fitData):
-    fitFileOut = gz(fitFile, 'wb')
+    #fitFileOut = gz(fitFile, 'wb')
+    fitFileOut = open(fitFile, 'w')
     dump(fitData, fitFileOut)
-    fitFileOut.close
+    fitFileOut.close()
+
+    popen(['cp', fitFile, fitFileCopy])
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
 # Uses cached stats as the primary check to detect unchanged files, and only then
 # does checksum comparisons if needed (just like git does)
-def getModifiedItems(existingItems):
+def getModifiedItems(existingItems, fitTrackedData):
     # get current stats info of all existing items
-    fitStatNew = [(f,stat(f)) for f in existingItems]
-    fitStatNew = dict([(f,(s.st_size, s.st_mtime, s.st_ctime, s.st_ino)) for f,s in fitStatNew])
+    statsNew = {f: _fitStats(f) for f in existingItems}
 
     # The stat file is a Python-pickled dictionary of the following form:
-    #   {filename -> hash, stat_info}
-    fitStatOld = load(open(statFile, 'rb')) if path.exists(statFile) else {}
+    #   {filename --> (st_size, st_mtime, st_ctime, st_ino, checksum_hash)}
+    #
+    statsOld = load(open(statFile)) if path.exists(statFile) else {}
 
     # An item is "touched" if its cached stats don't match its new stats.
-    # That doesn't necessarily mean its contents have been modified, so we
-    # check for modification next
-    touchedItems = [f for f in fitStatNew if fitStatNew[f][0] > 0 and (f not in fitStatOld or fitStatOld[f][1] != fitStatNew[f])]
+    # "Touched" is a necessary but not sufficient condition for an item to
+    # be considered "modified". Modified items are those that are touched
+    # AND whose checksums are different, so we do checksum comparisons next
+    touchedItems = [f for f in statsNew if statsNew[f][0] > 0 and (f not in statsOld or statsOld[f][1] != statsNew[f])]
 
     # Basically the next two lines make "touchedItems" a dictionary mapping filenames to their hash sums.
     # Hashes are re-computed ONLY for touched items. 
@@ -56,79 +106,90 @@ def getModifiedItems(existingItems):
     for i in existingItems:  # loop "existing" instead of touched items to update cached stats
                              # for everything, not just touched items
         trackedHash = fitTrackedData[i][0]
-        size = fitStatNew[i][0]
+        size = statsNew[i][0]
         if i in touchedItems and touchedItems[i] != trackedHash:
+            print 'touched: ', touchedItems[i],  trackedHash
             modifiedItems[i] = (touchedItems[i], size)
-        elif size > 0 and i in fitStatOld and fitStatOld[i][0] != trackedHash:
-            modifiedItems[i] = (fitStatOld[i][0], size)
+        elif size > 0 and i in statsOld and statsOld[i][0] != trackedHash:
+            print 'stats: ', statsOld[i][0],  trackedHash
+            modifiedItems[i] = (statsOld[i][0], size)
 
     # Update our cached stats if necessary
     writeStatCache = False
     if len(touchedItems) > 0:
         writeStatCache = True
         for f in touchedItems:
-            fitStatOld[f] = (touchedItems[f], fitStatNew[f])
+            statsOld[f] = (touchedItems[f], statsNew[f])
 
     # By this point we should have new stats for all existing items, stored in
-    # "fitStatOld". If we don't, it means some items have been deleted and can
+    # "statsOld". If we don't, it means some items have been deleted and can
     # be removed from the cached stats
-    if len(existingItems) != len(fitStatOld):
+    if len(existingItems) != len(statsOld):
         writeStatCache = True
-        for f in fitStatOld.keys():
+        for f in statsOld.keys():
             if f not in existingItems:
-                del fitStatOld[f]
+                del statsOld[f]
 
     if writeStatCache:
         statOut = open(statFile, 'wb')
-        dump(fitStatOld, statOut)
+        dump(statsOld, statOut)
         statOut.close()
 
     return modifiedItems
 
-def getChangedItems():
-    cwd = getcwd()
-    chdir(repoDir)
-    
-    # Get the list of files that fit is already tracking through a previous check-in.
-    # The fit file is gzipped python-pickled dictionary of this form:
-    #   {filename -> hash,size}
-    fitTrackedData = readFitFile()
-    itemsExpectedBefore = set(fitTrackedData)
-
-    # From those already being tracked, get those that we should continue to track (as
-    # indicated by currently read "fit" attributes that are set/unset)
-    itemsExpectedNow = set()
-    if len(itemsExpectedBefore) > 0:
-        p = popen('git check-attr --stdin fit'.split(), stdin=PIPE, stdout=PIPE)
-        p_stdout = p.communicate('\n'.join(itemsExpectedBefore))[0].split('\n')
-        itemsExpectedNow = set([l[:-10] for l in p_stdout if l.endswith(' set')])
-    
-    # From all existing physical files under repo directory, get those that fit should be
-    # tracking (as indicated by currently read "fit" attributes that are set/unset)
-    p = popen(('git ls-files -co').split(), stdout=PIPE)
+# From all existing physical files under repo directory NOT tracked by
+# git, get those that fit is being asked to track, as indicated by current
+# state of set/unset "fit" attributes. These are the foundItems.
+@gitDirOperation(repoDir)
+def getTrackedItems():
+    p = popen(('git ls-files -o').split(), stdout=PIPE)
     p = popen('git check-attr --stdin fit'.split(), stdin=p.stdout, stdout=PIPE)
-    itemsActual = set([l[:-11] for l in p.stdout if l.endswith(' set\n')])
+    return {l[:-11] for l in p.stdout if l.endswith(' set\n')}
 
-    # Use set difference and intersection to determine these four categories of changes
-    untrackedItems = itemsExpectedBefore - itemsExpectedNow
-    addedItems = itemsActual - itemsExpectedNow
-    removedItems = itemsExpectedNow - itemsActual
-    existingItems = itemsExpectedNow & itemsActual
+@gitDirOperation(repoDir)
+def getChangedItems(fitTrackedData):
+
+    # These are the items fit is currently tracking
+    expectedItems = set(fitTrackedData)
+
+    foundItems = getTrackedItems()
+
+    # Use set difference and intersection to determine some info about changes
+    # to the status of our items
+    existingItems = expectedItems & foundItems
+    newItems = foundItems - expectedItems
+    missingItems = expectedItems - foundItems
+
+    # An item could be in missingItems for one of two reasons: either it
+    # has been deleted from the working directory, or it has been marked
+    # to not be tracked by fit anymore. We separate out these two sets
+    # of missing items:
+    untrackedItems = {i for i in missingItems if path.exists(i)}
+    removedItems = missingItems - untrackedItems
 
     # From the existing items, we're interested in only the modified ones
-    modifiedItems = getModifiedItems(existingItems) if len(existingItems) else []
+    modifiedItems = getModifiedItems(existingItems, fitTrackedData) if len(existingItems) else []
     
-    chdir(cwd)
-    return (addedItems, removedItems, modifiedItems, untrackedItems)
+    return (modifiedItems, newItems, removedItems, untrackedItems)
 
+def filterBinaryFiles(files):
+    binaryFiles = []
 
+    p = popen('file -f -'.split(), stdout=PIPE, stdin=PIPE)
+    fileTypes = p.communicate('\n'.join(files))[0].strip().split('\n')
+
+    for f in fileTypes:
+        sepIdx = f.find(':')
+        filepath = f[:sepIdx]
+        if f.find('text', sepIdx) < 0:
+            binaryFiles.append(filepath)
+
+    return binaryFiles
+
+@gitDirOperation(repoDir)
 def getStagedOffenders():
-    cwd = getcwd()
-    chdir(repoDir)
-
     fitConflict = []
     binaryFiles = []
-    largeTextFiles = []
 
     staged = []
     p = popen('git diff --name-only --diff-filter=A --cached'.split(), stdout=PIPE)
@@ -141,17 +202,7 @@ def getStagedOffenders():
             staged.append(filepath)
 
     if len(staged) > 0:
-        p = popen('file -f -'.split(), stdout=PIPE, stdin=PIPE)
-        fileTypes = p.communicate('\n'.join(staged))[0].strip().split('\n')
+        binaryFiles = filterBinaryFiles(staged)
 
-        for f in fileTypes:
-            sepIdx = f.find(':')
-            filepath = f[:sepIdx]
-            if f.find('text', sepIdx) < 0:
-                binaryFiles.append(filepath)
-            elif path.getsize(filepath) > 102400:
-                largeTextFiles.append(filepath)
-
-    chdir(cwd)
-    return (fitConflict, binaryFiles, largeTextFiles)
+    return fitConflict, binaryFiles
 
