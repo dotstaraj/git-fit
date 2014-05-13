@@ -19,22 +19,24 @@ fit-managed items, bringing your working directory to a pristine condition (so u
 option with caution). In other words, whatever changes you see in the "git fit" status
 output before running --restore, you will no longer see after running --restore.
 
-git fit --get [-f] [<paths>...]
+git fit --get [-s] [<paths>...]
 
-Without the -f option, "git fit --get" will show the items for the current HEAD commit that
-need to be copied from the external location to the repository (if the item already exists
-in fit's local cache, it will be silently copied to its location). Use the -f option to
-actually begin the download of the missing, uncached items. Until this is done, any action
-in your project that requires the actual contents of these items will not work as
-expected.
+Begin the download of the missing, uncached items for the HEAD commit. Until this is done,
+any action in your project that requires the actual contents of these items will not work
+as expected. With the -s option, --get will only show a summary of what needs to be
+transferred. Optional <paths> can be specified to selectively download only certain items.
 
 
-git fit --put [-f]
+git fit --put [-s]
 
-Without the -f option, "git fit --put" will show the items for the current HEAD commit that
-still need to be copied to the external location from the repository. Use the -f option to
-actually begin the upload of those items. Until this is done, people who are using your
-commits will not have access to these items.
+Begin the upload of fit objects that have been committed to git but are not present in the
+etxternal location. Until this is done, people who are using your commits will not have access
+to these items. With the -s option, --put will only show a summary of what needs to be
+transferred.
+
+
+
+
 
 OTHER TOOLS
 
@@ -46,6 +48,8 @@ git-fat
 git-media
 
 However, git's clean/smudge filters force each filtered item to be fully read in from stdin and the transformations to be written to stdout. The side-effect is that these filters end up causing some basic and frequent git commands (such as status) to become really slow, countering the problem the tools were intended to help with in the first place. A small experiment will show that a super simple "clean = cat" filter applied to a directory containing about 200MB of images can cause git status to run 7x slower than without the filter applied (about 4.3s versus 0.6s). Besides this, there are other issues with some of the tools, like too many dependencies, inflexible storage locations, inactivity/abandonment, etc. If git's clean/smudge filters did work efficiently though, then git-exile would probably be the best choice, and git-fit would probably have not been written. (There is also the git-annex tool and it does not currently use clean and smudge filters, but it has other major differences with the design goals of git-fit.)
+
+
 
 
 
@@ -66,6 +70,9 @@ See "Configuration" below. Fit will just pretend these items are not there.
 
 (2) Items committed to the repo and tracked by git
 Fit will NEVER touch items that have already been committed into git, never, no exceptions. Item being tracked by fit somehow committed into git repo? Fit will stop tracking it. There's an item already committed to git, and you're now asking fit to handle it? Well, it won't. For fit to handle something the first requirement is that it not be already tracked by git. If there is such an item and you need fit to handle, it must first be untracked from git by doing something like "git remove".
+
+
+
 
 
 CONFIGURATION

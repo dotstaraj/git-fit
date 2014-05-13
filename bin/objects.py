@@ -46,16 +46,16 @@ def placeObject(objName, source):
 
     if not (exists(objInCache) or exists(objToSync)):
         popen(('mkdir -p %s'%dirname(objToSync)).split()).wait()
-        popen(('cp %s %s'%(source, objToSync)).split())
+        popen(('cp %s %s'%(source, objToSync)).split()).wait()
 
 @gitDirOperation(repoDir)
 def getUnsyncedObjects():
-    objects = {}
+    objects = []
 
     for root, dirs, files in walk(syncDir):
         for f in files:
             objPath = joinpath(root,f)
-            objects[basename(dirname(objPath))+basename(objPath)] = objPath
+            objects.append(basename(dirname(objPath))+basename(objPath))
     
     return objects
 
@@ -90,10 +90,9 @@ class _ProgressPrinter:
     def setTotalSize(self, totalSize):
         self.size_total = totalSize
 
-def get(fitTrackedData, paths, transfer=False):
+def get(fitTrackedData, paths, summary=False):
     global _fitstore
     needed = []   # not in working tree nor in cache, must be downloaded
-    missing = []  # not in working tree, cache, OR external location!
     
     if len(fitTrackedData) == 0 or len(paths) == 0:
         return
@@ -109,16 +108,20 @@ def get(fitTrackedData, paths, transfer=False):
             if objPath:
                 copyfile(objPath, filePath)
             else:
-                key = store.check(_getObjectInfo(objHash)[0])
-                if key:
-                    needed.append((filePath, key, _getObjectInfo(objHash)[1], size))
-                else:
-                    missing.append(filePath)
+                obj, objInCache, objToSync = _getObjectInfo(objHash)
+                needed.append((filePath, obj, objInCache, size))
 
     totalSize = sum([size for f,k,o,size in needed])
     pp.setTotalSize(totalSize)
 
-    if transfer:
+    if summary:
+        if len(needed):
+            print len(fitTrackedData), 'items are being tracked'
+            print len(needed), 'of the tracked items are not cached locally (need to be downloaded)'
+            print '%.2fMB in total can be downloaded'%(totalSize/1048576)
+        else:
+            print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
+    else:
         errors = []
         for filePath,key,objPath,size in needed:
             pp.newItem(filePath, size)
@@ -127,37 +130,26 @@ def get(fitTrackedData, paths, transfer=False):
             # This is to prevent interrupted downloads from causing bad objects to be placed
             # in the objects cache
             tempTransferFile = joinpath(fitDir, '.tempTransfer')
-            if store.get(key, tempTransferFile, size):
-                popen(['mkdir', '-p', dirname(objPath)])
-                popen(['mv', tempTransferFile, objPath])
-                popen(['cp', objPath, filePath])
+            key = store.check(key)
+            if key and store.get(key, tempTransferFile, size):
+                popen(['mkdir', '-p', dirname(objPath)]).wait()
+                popen(['mv', tempTransferFile, objPath]).wait()
+                popen(['cp', objPath, filePath]).wait()
             else:
                 errors.append(filePath)
         pp.done()
-        if len(needed) > 0 and len(errors) < len(needed):
-            print 'refreshing'
-            getChangedItems(fitTrackedData)  # just refresh file stats
 
         if len(errors) > 0:
             print 'Some items could not be transferred:'
             print '\n'.join(errors)
             print 'Above items could not be transferred:'
-    else:
-        if len(needed) or len(missing):
-            print len(fitTrackedData), 'items are being tracked'
-            print (len(needed)+len(missing)), 'of the tracked items are not cached locally (need to be downloaded)'
-            if len(missing):
-                print len(missing), 'of those items were NOT found in external location (no way to retrieve these!)'
-            print '%.2fMB in total can be downloaded'%(totalSize/1048576)
-        else:
-            print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
+
 
     store.close()
 
-def put(fitTrackedData, transfer=False):
+def put(fitTrackedData, summary=False):
     global _fitstore
     available = []   # not in external location, must be uploaded
-    missing = []     # not in external location, cache, OR working copy!
     
     if len(fitTrackedData) == 0:
         return
@@ -168,44 +160,45 @@ def put(fitTrackedData, transfer=False):
     for filePath,(objHash, size) in fitTrackedData.iteritems():
         obj, objInCache, objToSync = _getObjectInfo(objHash)
         objPath = findObject(objHash)
-        if store.check(obj):
-            if objPath == objToSync:
-                popen(['mkdir', '-p', dirname(objInCache)])
-                popen(['mv', objPath, objInCache])
-        else:
-            if objPath:
-                available.append((filePath, obj, objPath, objInCache, size))
-            else:
-                missing.append(filePath)
+
+        if objPath == objToSync:
+            available.append((filePath, obj, objPath, objInCache, size))
 
     totalSize = sum([size for f,k,o,c,size in available])
     pp.setTotalSize(totalSize)
 
-    if transfer:
+    if summary:
+
+        if len(available)> 0:
+            print len(fitTrackedData), 'items are being tracked'
+            print len(available), 'of the tracked items MAY need to be sent to external location'
+            print '%.2fMB maximum possible transfer size'%(totalSize/1048576)
+        else:
+            print 'No tranfers needed! There are no objects to put in external location for HEAD commit.'
+    else:
         errors = []      
         for filePath,keyName,objPath,objInCache,size in available:
             pp.newItem(filePath, size)
-            if store.put(objPath, keyName, size):
-                if objPath != objInCache:
-                    popen(['mkdir', '-p', dirname(objInCache)])
-                    popen(['mv', objPath, objInCache])
-            else:
+            if exists(objPath):
+                move = True
+                if store.check(keyName):
+                    pp.updateProgress(size, size)
+                elif not store.put(objPath, keyName, size):
+                    move = False
+                    errors.append(filePath)
+                if move:
+                    popen(['mkdir', '-p', dirname(objInCache)]).wait()
+                    popen(['mv', objPath, objInCache]).wait()
+            elif not exists(objInCache):
                 errors.append(filePath)
+            else:
+                pp.updateProgress(size, size)
 
         pp.done()
         if len(errors) > 0:
             print '\nSome items could not be transferred:'
             print '\n'.join(errors)
             print '\nAbove items could not be transferred:'
-    else:
-        if len(available)+len(missing) > 0:
-            print len(fitTrackedData), 'items are being tracked'
-            print (len(available)+len(missing)), 'of the tracked items have not been sent to external location (need to be uploaded)'
-            if len(missing) > 0:
-                print len(missing), 'items missing locally AND remotely (no way to retrieve these)'
-            print '%.2fMB needs to be uploaded'%(totalSize/1048576)
-        else:
-            print 'No tranfers needed! There are no objects to put in external location for HEAD commit.'
 
     store.close()
 

@@ -18,8 +18,8 @@ class Store(objects.Store):
     def put(self, src, dst, size):
         if exists(src):
             dst = joinpath(self.dir, dst)
-            popen(['mkdir', '-p', dirname(dst)])
-            popen(['cp', src, dst])
+            popen(['mkdir', '-p', dirname(dst)]).wait()
+            popen(['cp', src, dst]).wait()
             return True
 
     def check(self, key):

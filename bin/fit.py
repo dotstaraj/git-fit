@@ -63,16 +63,14 @@ def _fitStats(filename):
 #   {filename --> hash,size}
 #
 def readFitFile(fileToRead=fitFile):
-    #return load(gz(fitFile)) if path.exists(fitFile) else {}
-    return load(open(fileToRead)) if path.exists(fileToRead) else {}
+    return load(gz(fitFile)) if path.exists(fitFile) else {}
 
 def writeFitFile(fitData):
-    #fitFileOut = gz(fitFile, 'wb')
-    fitFileOut = open(fitFile, 'w')
+    fitFileOut = gz(fitFile, 'wb')
     dump(fitData, fitFileOut)
     fitFileOut.close()
 
-    popen(['cp', fitFile, fitFileCopy])
+    popen(['cp', fitFile, fitFileCopy]).wait()
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
 # Uses cached stats as the primary check to detect unchanged files, and only then
@@ -90,7 +88,7 @@ def getModifiedItems(existingItems, fitTrackedData):
     # "Touched" is a necessary but not sufficient condition for an item to
     # be considered "modified". Modified items are those that are touched
     # AND whose checksums are different, so we do checksum comparisons next
-    touchedItems = [f for f in statsNew if statsNew[f][0] > 0 and (f not in statsOld or statsOld[f][1] != statsNew[f])]
+    touchedItems = [f for f in statsNew if statsNew[f][0] > 0 and (f not in statsOld or tuple(statsOld[f][1]) != statsNew[f])]
 
     # Basically the next two lines make "touchedItems" a dictionary mapping filenames to their hash sums.
     # Hashes are re-computed ONLY for touched items. 
@@ -108,10 +106,8 @@ def getModifiedItems(existingItems, fitTrackedData):
         trackedHash = fitTrackedData[i][0]
         size = statsNew[i][0]
         if i in touchedItems and touchedItems[i] != trackedHash:
-            print 'touched: ', touchedItems[i],  trackedHash
             modifiedItems[i] = (touchedItems[i], size)
         elif size > 0 and i in statsOld and statsOld[i][0] != trackedHash:
-            print 'stats: ', statsOld[i][0],  trackedHash
             modifiedItems[i] = (statsOld[i][0], size)
 
     # Update our cached stats if necessary

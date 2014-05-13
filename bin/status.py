@@ -1,7 +1,6 @@
 from fit import getChangedItems, getStagedOffenders
 from objects import getUnsyncedObjects
 from itertools import chain
-from subprocess import Popen as popen
 
 '''
 parser = argparse.ArgumentParser(prog='fit')
@@ -14,7 +13,7 @@ def printLegend():
     print 'Meaning of status symbols:'
     print '-------------------------------------------------------------------------------'
     print '^   locally cached fit object that MAY need to be uploaded to fulfill a commit'
-    print '    (run "git fit --put" to check and refresh, and add -f to upload if required)'
+    print '    (run "git fit --put -s" to check and refresh, or without -s to upload if needed)'
     print
     print '*   modified'
     print '+   new/added (fit will start tracking upon commit)'

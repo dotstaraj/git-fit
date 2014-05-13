@@ -8,7 +8,6 @@ sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
 from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, readFitFile
 import status, hooks, objects, paths
-from subprocess import Popen as popen
 import stat
 
 
@@ -27,22 +26,20 @@ fit-managed items, bringing your working directory to a pristine condition (so u
 option with caution). In other words, whatever changes you see in the "git fit" status
 output before running --restore, you will no longer see after running --restore.
 
-git fit --get [-f] [<paths>...]
+git fit --get [-s] [<paths>...]
 
-Without the -f option, "git fit --get" will show the items for the current HEAD commit that
-need to be copied from the external location to the repository (if the item already exists
-in fit's local cache, it will be silently copied to its location). Use the -f option to
-actually begin the download of the missing, uncached items. Until this is done, any action
-in your project that requires the actual contents of these items will not work as
-expected.
+Begin the download of the missing, uncached items for the HEAD commit. Until this is done,
+any action in your project that requires the actual contents of these items will not work
+as expected. With the -s option, --get will only show a summary of what needs to be
+transferred. Optional <paths> can be specified to selectively download only certain items.
 
 
-git fit --put [-f]
+git fit --put [-s]
 
-Without the -f option, "git fit --put" will show the items for the current HEAD commit that
-still need to be copied to the external location from the repository. Use the -f option to
-actually begin the upload of those items. Until this is done, people who are using your
-commits will not have access to these items.
+Begin the upload of fit objects that have been committed to git but are not present in the
+etxternal location. Until this is done, people who are using your commits will not have access
+to these items. With the -s option, --put will only show a summary of what needs to be
+transferred.
 '''
 
 
@@ -78,6 +75,8 @@ def firstTimeRepoSetup():
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'post-checkout'),  stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
+    hooks.postCheckout(readFitFile())
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         if sys.argv[1] in ('-h', '--help'):
@@ -92,7 +91,7 @@ if __name__ == '__main__':
 
     group.add_argument('--get', action='store_true')
     group.add_argument('--put', action='store_true')
-    parser.add_argument('-f', '--transfer', action='store_true')
+    parser.add_argument('-s', '--summary', action='store_true')
 
     # Undocumented --run-hook arguments. This allows git-hooking by simply
     # insering one-line commands like "git fit --run-hook-preCommit" into
@@ -118,17 +117,16 @@ if __name__ == '__main__':
         hooks.postCheckout(fitTrackedData)
     elif opts.get:
         objects.loadstore()
-        objects.get(fitTrackedData, validPaths, transfer=opts.transfer)
+        objects.get(fitTrackedData, validPaths, summary=opts.summary)
     elif opts.put:
         objects.loadstore()
-        objects.put(fitTrackedData, transfer=opts.transfer)
+        objects.put(fitTrackedData, summary=opts.summary)
     elif opts.restore:
-        restore(fitTrackedData, validPaths)
+        hooks.postCheckout(fitTrackedData)
     else:
         status.printStatus(fitTrackedData, validPaths, legend=opts.legend)
 
 '''
 - symlinks (just ignore for now)
-- hard-reset option
 - size warning/limiting/cleanup
 '''

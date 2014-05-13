@@ -26,9 +26,9 @@ def postCheckout(fitTrackedData):
             open(filePath, 'w').close()  #write a 0-byte file as placeholder
             missing += 1
     if missing > 0:
-        print '* git-fit: %d fit objects are not cached and must be downloaded for this commit.'%missing
-        print '* To download them, run "git fit --get -f".'
-        print '* Optionally, provide paths to this command to selectively download the objects you want.'
+        print '* git-fit: %d fit objects are not cached and must be downloaded for the HEAD commit.'%missing
+        print '* To download them, run "git fit --get". Optionally, provide paths to this command'
+        print '* to selectively download only the objects you want.\n'
 
     writeFitFile(fitTrackedData)
 
@@ -80,5 +80,5 @@ def preCommit(fitTrackedData):
     fitTrackedData.update(added)
 
     writeFitFile(fitTrackedData)
-    popen('git add -f'.split()+[fitFile])
+    popen('git add -f'.split()+[fitFile]).wait()
 
