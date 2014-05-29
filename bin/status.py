@@ -31,7 +31,7 @@ def printStatus(fitTrackedData, paths, legend=True):
         printLegend()
 
     unsynced = getUnsyncedObjects()
-    unsynced = [i for i,(h,s) in fitTrackedData.iteritems() if h in unsynced]
+    unsynced = [p for p in paths if fitTrackedData[p][0] in unsynced]
 
     modified, added, removed, untracked = getChangedItems(fitTrackedData)
     conflict, binary = getStagedOffenders()
@@ -41,7 +41,7 @@ def printStatus(fitTrackedData, paths, legend=True):
     paths = set(paths)
 
     # TODO: filter by paths also for added, conflict, and binary!!
-    unsynced =  [('^  ', i) for i in unsynced if i in paths]
+    unsynced =  [('^  ', i) for i in unsynced]
     modified =  [('*  ', i) for i in set(modified)-offenders if i in paths]
     added =     [('+  ', i) for i in set(added)-offenders]
     removed =   [('-  ', i) for i in removed if i in paths]

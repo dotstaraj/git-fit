@@ -1,7 +1,8 @@
 from fit import gitDirOperation, repoDir, fitDir, cacheDir, syncDir, getChangedItems
+from fit import refreshStats
 from subprocess import Popen as popen
 from os.path import dirname, basename, exists, join as joinpath, getsize
-from os import walk
+from os import walk, makedirs, remove
 from shutil import copyfile, move
 from sys import stdout
 
@@ -59,6 +60,46 @@ def getUnsyncedObjects():
     
     return objects
 
+@gitDirOperation(repoDir)
+def restoreItems(fitTrackedData):
+    modified, added, removed, untracked = getChangedItems(fitTrackedData)
+
+    for i in added:
+        print 'Removing: %s'%i
+        remove(i)
+
+    itemsToRestore = set(modified)
+    itemsToRestore.update(set(removed))
+    missing = 0
+    count = 0
+    total = len(itemsToRestore)
+    touched = {}
+    for filePath in itemsToRestore:
+        count += 1
+        stdout.flush()
+
+        objHash = fitTrackedData[filePath][0]
+        objPath = findObject(objHash)
+        fileDir = dirname(filePath)
+        fileDir and (exists(fileDir) or makedirs(fileDir))
+        if objPath:
+            print 'Restoring: %s'%filePath
+            copyfile(objPath, filePath)
+            touched[filePath] = objHash
+        else:
+            print 'Restoring (empty): %s'%filePath
+            open(filePath, 'w').close()  #write a 0-byte file as placeholder
+            missing += 1
+    print
+
+    refreshStats(touched)
+
+    if missing > 0:
+        print '* git-fit: %d of the fit objects were restored with empty stub files because they'%missing
+        print '* are not cached and must be downloaded for the HEAD commit.'
+        print '* To download them, run "git fit --get". Optionally, provide paths to this command'
+        print '* to selectively download only the objects you want.\n'
+
 class _ProgressPrinter:
     def __init__(self):
         self.size_total = 0
@@ -68,12 +109,12 @@ class _ProgressPrinter:
 
     def updateProgress(self, done, size):
         fmt_args = (
-                self.item_name,
+                (self.size_done+done)*100./self.size_total,
                 self.size_item/1048576.,
                 done*100./size,
-                (self.size_done+done)*100./self.size_total
+                self.item_name
         )
-        print '\r%s:    %7.3f MB    %6.2f%%       Overall: %6.2f%%'%fmt_args,
+        print '\rOverall: %6.2f%%    %7.3f MB   %6.2f%%   %s'%fmt_args,
         stdout.flush()
     def newItem(self, name, size):
         if self.size_item:
@@ -90,40 +131,55 @@ class _ProgressPrinter:
     def setTotalSize(self, totalSize):
         self.size_total = totalSize
 
-def get(fitTrackedData, paths, summary=False):
+class _QuietProgressPrinter:
+    def updateProgress(self, done, size):
+        pass
+    def newItem(self, name, size):
+        pass
+    def done(self):
+        pass
+    def setTotalSize(self, totalSize):
+        pass
+
+
+def get(fitTrackedData, paths, summary=False, quiet=False):
     global _fitstore
     needed = []   # not in working tree nor in cache, must be downloaded
     
     if len(fitTrackedData) == 0 or len(paths) == 0:
         return
 
-    pp = _ProgressPrinter()
+    pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
     store = _fitstore.Store(pp.updateProgress)
+
+    touched = {}
     
     for filePath in paths:
         objHash, size = fitTrackedData[filePath]
-        if exists(filePath) and getsize(filePath) == 0:
+        if not exists(filePath) or getsize(filePath) == 0:
             objPath = findObject(objHash)
-            
+            fileDir = dirname(filePath)
+            fileDir and (exists(fileDir) or makedirs(fileDir))
             if objPath:
                 copyfile(objPath, filePath)
+                touched[filePath] = objHash
             else:
                 obj, objInCache, objToSync = _getObjectInfo(objHash)
-                needed.append((filePath, obj, objInCache, size))
+                needed.append((filePath, obj, objHash, objInCache, size))
 
-    totalSize = sum([size for f,k,o,size in needed])
+    totalSize = sum([size for f,k,h,o,size in needed])
     pp.setTotalSize(totalSize)
 
     if summary:
         if len(needed):
-            print len(fitTrackedData), 'items are being tracked'
+            print len(paths), 'items are being tracked'
             print len(needed), 'of the tracked items are not cached locally (need to be downloaded)'
             print '%.2fMB in total can be downloaded'%(totalSize/1048576)
         else:
             print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
     else:
         errors = []
-        for filePath,key,objPath,size in needed:
+        for filePath,key,objHash,objPath,size in needed:
             pp.newItem(filePath, size)
             
             # Copy download to temp file first, and then to actual object location
@@ -135,6 +191,7 @@ def get(fitTrackedData, paths, summary=False):
                 popen(['mkdir', '-p', dirname(objPath)]).wait()
                 popen(['mv', tempTransferFile, objPath]).wait()
                 popen(['cp', objPath, filePath]).wait()
+                touched[filePath] = objHash
             else:
                 errors.append(filePath)
         pp.done()
@@ -144,18 +201,18 @@ def get(fitTrackedData, paths, summary=False):
             print '\n'.join(errors)
             print 'Above items could not be transferred:'
 
-
+    refreshStats(touched)
     store.close()
 
-def put(fitTrackedData, summary=False):
+def put(fitTrackedData, summary=False, quiet=False):
     global _fitstore
     available = []   # not in external location, must be uploaded
     
     if len(fitTrackedData) == 0:
         return
 
-    pp = _ProgressPrinter()
-    store = _fitstore.Store(pp.updateProgress)
+    pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
+    store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
     
     for filePath,(objHash, size) in fitTrackedData.iteritems():
         obj, objInCache, objToSync = _getObjectInfo(objHash)
@@ -168,7 +225,6 @@ def put(fitTrackedData, summary=False):
     pp.setTotalSize(totalSize)
 
     if summary:
-
         if len(available)> 0:
             print len(fitTrackedData), 'items are being tracked'
             print len(available), 'of the tracked items MAY need to be sent to external location'

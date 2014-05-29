@@ -14,10 +14,12 @@ selfDir = path.dirname(path.realpath(__file__))
 gitDir = popen('git rev-parse --git-dir'.split(), stdout=PIPE).communicate()[0].strip()
 fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')
-fitFileCopy = path.join(fitDir, 'fitFileCopy')
 cacheDir = path.join(fitDir, 'objects')
 syncDir = path.join(cacheDir, 'tosync')
 statFile = path.join(fitDir, 'stat')
+conflictFile = path.join(repoDir, 'FIT_MERGE')
+mineFitFile = path.join(fitDir, 'merge_mine')
+otherFitFile = path.join(fitDir, 'merge_other')
 
 # Parameterized decorator that will wrap the decoratee with a cd into the git directory
 # before running the operation, and a cd back into the starting directory afterwards.
@@ -62,15 +64,27 @@ def _fitStats(filename):
 # The fit file is gzipped Python-pickled dictionary of this form:
 #   {filename --> hash,size}
 #
-def readFitFile(fileToRead=fitFile):
-    return load(gz(fitFile)) if path.exists(fitFile) else {}
+def readFitFile(filePath=fitFile):
+    return load(gz(filePath)) if path.exists(filePath) else {}
 
-def writeFitFile(fitData):
-    fitFileOut = gz(fitFile, 'wb')
+def writeFitFile(fitData, filePath=fitFile):
+    fitFileOut = gz(filePath, 'wb')
     dump(fitData, fitFileOut)
     fitFileOut.close()
 
-    popen(['cp', fitFile, fitFileCopy]).wait()
+def readStatFile():
+    return load(open(statFile)) if path.exists(statFile) else {}
+
+def writeStatFile(stats):
+    statOut = open(statFile, 'wb')
+    dump(stats, statOut)
+    statOut.close()
+
+def refreshStats(items):
+    stats = readStatFile()
+    for i in items:
+        stats[i] = (items[i], _fitStats(i))
+    writeStatFile(stats)
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
 # Uses cached stats as the primary check to detect unchanged files, and only then
@@ -82,7 +96,7 @@ def getModifiedItems(existingItems, fitTrackedData):
     # The stat file is a Python-pickled dictionary of the following form:
     #   {filename --> (st_size, st_mtime, st_ctime, st_ino, checksum_hash)}
     #
-    statsOld = load(open(statFile)) if path.exists(statFile) else {}
+    statsOld = readStatFile()
 
     # An item is "touched" if its cached stats don't match its new stats.
     # "Touched" is a necessary but not sufficient condition for an item to
@@ -127,9 +141,7 @@ def getModifiedItems(existingItems, fitTrackedData):
                 del statsOld[f]
 
     if writeStatCache:
-        statOut = open(statFile, 'wb')
-        dump(statsOld, statOut)
-        statOut.close()
+        writeStatFile(statsOld)
 
     return modifiedItems
 
@@ -201,4 +213,3 @@ def getStagedOffenders():
         binaryFiles = filterBinaryFiles(staged)
 
     return fitConflict, binaryFiles
-

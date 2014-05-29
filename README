@@ -3,36 +3,64 @@
 
 INTRODUCTION
 
-git-fit helps your git repo stay fit and slim and keep git commands running fast. It lets you offload bloat (binary files) away from the repo and into some external location, committing instead only a single, small file with pointers into the external location. Integration with git through hooks, fit takes care of most things automatically behind the scenes. Other than that, there are only the below few commands you need to know in order to stay fit. ALL of these commands operate only on the HEAD revision that the repository currently points to. The commands, with the full set of options, are:
+git-fit helps your git repo stay fit and slim and keep git commands running fast. It lets you
+offload bloat (binary files) away from the repo and into some external location, committing
+instead only a single, small file with pointers into the external location. Integration with
+git through hooks, fit takes care of most things automatically behind the scenes. Other than
+that, there are only the below few commands you need to know in order to stay fit. ALL of
+these commands operate only on the HEAD revision that the repository currently points to. The
+commands, with the full set of options, are:
 
 git fit [--legend] [<paths>...]
 
-Show the fit state of the working copy and any detected problems. For any "git commit"
-issued on the working copy, fit will automatically update the commit to properly associate
-it with any changes to fit-managed items. Use the --legend option to not print an
-explanatory legend with status symbol meanings.
+Show the fit state of the working tree and any detected problems. Use the --legend option to
+print an explanatory legend with status symbol meanings. The items shown will be any of the
+following: items ADDED to fit (+), items being tracked that are DELETED from working
+directory (-), items being tracked that are MODIFIED (*), items tracked that are now marked to
+be UNTRACKED (~), items in the HEAD commit that may need to be UPLOADED (^), and any items that
+will abort a future git-commit (!). It is possible for any item to have more than one status
+type. For instance, if you commit a new fit file and then change it again (without having yet
+run --put), that item will show ^* as its status.
 
-git fit --restore
+git fit --save [<paths>...]
 
-The "--restore" option will irreversibly discard all uncommitted changes to your
-fit-managed items, bringing your working directory to a pristine condition (so use this
-option with caution). In other words, whatever changes you see in the "git fit" status
-output before running --restore, you will no longer see after running --restore.
+Update fit with current working tree changes to fit-tracked items. This will update the .fit
+file, which can them be "git add"-ed in preparation for a commit. After running this command,
+any items that were shown as modified, added, removed, or untracked (*, +, -, ~) by the status
+output of git fit will no longer be shown as such. However, commit-aborting items (!) and
+items that may need to be uploaded (^) will continue to be shown in the status.
 
-git fit --get [-s] [<paths>...]
+git fit --restore [-f] [<paths>...]
+
+Remove all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
+IRREVERSIBLY discard all uncommitted changes to your fit-tracked items, bringing your working
+tree to a pristine condition with respect to those objects currently being tracked by fit (so
+use this command with caution). In other words, whatever modified, added, or removed (*, +, -)
+items you see in the "git fit" status output before running --restore, you will no longer see
+after running --restore. Because of its destructive potential, the command must be run with
+the -f option for it to actually affect your working tree (otherwise it will just show dry-run
+summary and warning). The following changes will continue to be shown and cannot be "restored"
+with this command: items marked to be untracked from fit (~), items that may need to be
+uploaded (^), and any commit-aborting items (!).
+
+git fit --get [-s] [-q] [<paths>...]
 
 Begin the download of the missing, uncached items for the HEAD commit. Until this is done,
 any action in your project that requires the actual contents of these items will not work
 as expected. With the -s option, --get will only show a summary of what needs to be
 transferred. Optional <paths> can be specified to selectively download only certain items.
+Use -q to to turn off progress output for transfers.
 
-
-git fit --put [-s]
+git fit --put [-s] [-q]
 
 Begin the upload of fit objects that have been committed to git but are not present in the
 etxternal location. Until this is done, people who are using your commits will not have access
 to these items. With the -s option, --put will only show a summary of what needs to be
-transferred.
+transferred. Use -q to to turn off progress output for transfers. Note that sometimes an item
+may have "may need to be uploaded" status (^), but --put might not actually uploaded it
+because it already exists in the external location. Running --put will clear the item of this
+status in either case.
+'''
 
 
 
@@ -40,14 +68,27 @@ transferred.
 
 OTHER TOOLS
 
-There are other tools that are designed to solve the same problem. The following tools have varying features/functionalities and all use git's clean and smudge filters to seamlessly integrate with git commands.
+There are other tools that are designed to solve the same problem. The following tools have
+varying features/functionalities and all use git's clean and smudge filters to seamlessly
+integrate with git commands.
 
 git-exile
 git-bin
 git-fat
 git-media
 
-However, git's clean/smudge filters force each filtered item to be fully read in from stdin and the transformations to be written to stdout. The side-effect is that these filters end up causing some basic and frequent git commands (such as status) to become really slow, countering the problem the tools were intended to help with in the first place. A small experiment will show that a super simple "clean = cat" filter applied to a directory containing about 200MB of images can cause git status to run 7x slower than without the filter applied (about 4.3s versus 0.6s). Besides this, there are other issues with some of the tools, like too many dependencies, inflexible storage locations, inactivity/abandonment, etc. If git's clean/smudge filters did work efficiently though, then git-exile would probably be the best choice, and git-fit would probably have not been written. (There is also the git-annex tool and it does not currently use clean and smudge filters, but it has other major differences with the design goals of git-fit.)
+However, git's clean/smudge filters force each filtered item to be fully read in from stdin
+and the transformations to be written to stdout. The side-effect is that these filters end up
+causing some basic and frequent git commands (such as status) to become really slow,
+countering the problem the tools were intended to help with in the first place. A small
+experiment will show that a super simple "clean = cat" filter applied to a directory
+containing about 200MB of images can cause git status to run 7x slower than without the filter
+applied (about 4.3s versus 0.6s). Besides this, there are other issues with some of the tools,
+like too many dependencies, inflexible storage locations, inactivity/abandonment, etc. If
+git's clean/smudge filters did work efficiently though, then git-exile would probably be the
+best choice, and git-fit would probably have not been written. (There is also the git-annex
+tool and it does not currently use clean and smudge filters, but it has other major
+differences with the design goals of git-fit.)
 
 
 
@@ -55,21 +96,35 @@ However, git's clean/smudge filters force each filtered item to be fully read in
 
 HOW IT WORKS
 
-Unlike the tools above, the only way git-fit transparently integrates with the git system is through hooks (and not through clean/smudge filters). So, unless it is invoked through any of the three commands, fit will just stay out of your way until commit or checkout. The trade-off resulting from this alternative setup is that that commands like git status or git diff will not be directly aware of the true state of fit-managed items. git-fit sacrifices this convenience in favor of speed and efficiency.
+Unlike the tools above, the only way git-fit transparently integrates with the git system is
+through hooks (and not through clean/smudge filters). So, unless it is invoked through any of
+the five available commands, fit will just stay out of your way until commit or checkout. The
+trade-off resulting from this alternative setup is that that commands like git status or git
+diff will not be directly aware of the true state of fit-managed items. git-fit sacrifices
+this convenience in favor of speed and efficiency.
 
-What fit will handle
-(1) Items you've told fit to track.
-See "Configuration" below. Fit will detect changes in these items and offload them to your specified external location.
+What fit WILL handle
+(1) Items you've TOLD fit to track.
+See "Configuration" below. Fit will detect changes in these items and offload them to your
+specified external location.
 
 (2) Untracked binary files that are staged for commit into git
-Any binary file that fit has not been told about will abort any attempted commit that includes those items as new additions. Fit must be told either to ignore these items or to track them. This enforcement is a feature intended to prevent accidental commits of items that should actually be handled by fit.
+For any binary file that is added to git and fit has not been told about, a git commit
+including that binary file will cause that commit to be aborted. Fit must be told to either
+ignore these items or track them. This enforcement is a feature intended to prevent accidental
+commits of items that should actually be handled by fit.
 
-What fit will NOT handle
-(1) Items you've told fit to ignore.
+What fit WILL NOT handle
+(1) Items you've TOLD fit to ignore.
 See "Configuration" below. Fit will just pretend these items are not there.
 
-(2) Items committed to the repo and tracked by git
-Fit will NEVER touch items that have already been committed into git, never, no exceptions. Item being tracked by fit somehow committed into git repo? Fit will stop tracking it. There's an item already committed to git, and you're now asking fit to handle it? Well, it won't. For fit to handle something the first requirement is that it not be already tracked by git. If there is such an item and you need fit to handle, it must first be untracked from git by doing something like "git remove".
+(2) Items committed to the repo and already tracked by git
+Fit will NEVER touch items that have already been committed into git, never, no exceptions.
+Item being tracked by fit now somehow committed into git repo? Fit will stop tracking it.
+There's an item already committed to git, and you're now asking fit to handle it? Well, it
+won't. For fit to handle something, the first requirement is that it not be already tracked by
+git. If there is such an item that you need fit to handle instead, it must first be untracked
+from git by doing something like "git remove".
 
 
 
@@ -78,25 +133,51 @@ Fit will NEVER touch items that have already been committed into git, never, no 
 CONFIGURATION
 Initial one-time setup
 Initial set-up to enable git-fit on your repo requires two steps:
-(NOTE: do not run "git fit" if any of the following git hooks are enabled and being used for your repo: pre-commit, post-commit, or post-checkout. See more details below. )
+(* NOTE: do not run "git fit" if you are already using any of the following hooks for your own
+purpose: pre-commit, post-commit, post-checkout, or post-merge. See
+more details below regarding this.)
     
-    (1) Add git-fit to your PATH
+    (1) Add the git-fit root directory to your PATH
     (2) Run "git fit" inside your repo
 
-The first time "git fit" is run inside a repo, it initializes it. Everytime thereafter, it shows the status.
+Running "git-fit" by iteself normally just shows the status, but the first time it is run on a
+newly cloned repo, it also initializes the repo for fit use.
+
 
 Instructing fit with include/exclude rules
-Once initial setup is complete, you need to sprinkle .gitattributes and .gitignore files around your working tree (or update them), depending on which files you need to include or exclude from git-fit. See the gitignore help page to learn how to specify patterns to match and select files (.gitattributes files use the same pattern syntax as .gitignore files). Here is a simple, common use-case example, which will include all PNG images in the directory and its sub-directories to be handled by git-fit:
+Once initial setup is complete, you need to sprinkle .gitattributes and .gitignore files
+around your working tree (or update them), depending on which files you need to include or
+exclude from git-fit. See the gitignore help page to learn how to specify patterns to match
+and select files (.gitattributes files use the same pattern syntax as .gitignore files). Here
+is a simple, common use-case example, which will include all PNG images in the directory and
+its sub-directories to be handled by git-fit:
 
 *.png fit
 
-To explicitly exclude files from fit, you would have in .gitattributes something like the following (notice the minus sign prefixed to the "fit" attribute):
+To explicitly exclude files from fit, you would have in .gitattributes something like the
+following (notice the minus sign prefixed to the "fit" attribute):
 
 *.jar -fit
 
-This would allow all the jar files in the directory to be ignored by fit and committed through the normal git commit flow if desired, and fit will not complain about these items even though they are binary.
+This would allow all the jar files in the directory to be ignored by fit and committed through
+the normal git commit flow if desired, and fit will not complain about these items even though
+they are binary.
 
 -----------
 * Note about existing git hooks in your repo:
-If you already have an existing pre-commit hook doing other checks, setup might be a little less straightforward. In general, any pre-commit hook should eventually terminate with a zero or non-zero exit code, indicating whether the commit is to be accepted or rejected, respectively. If the hook is running multiple checks, then the first check that fails (if any) should cause the hook to immediately exit with a non-zero code. Assuming your existing pre-commit is behaving this way, then git-fit/bin/pre-commit is just another check in the list that you can add. You can call it from your existing pre-commit hook and use its exit code to decide what to do next in the hook script.
+If you already have any of the these hooks doing other things, setup might be a little less
+straightforward. Someone with knowledge about the existing hooks in your repo should follow
+the direction below to add fit into your existing hooks. For all the git commands shown
+below, NEVER RUN THEM DIRECTLY yourself. They are only meant to be used as hooks.
 
+The PRE-COMMIT hook:
+Your hook executable will need to run: "git fit --pre-commit"
+
+The POST-COMMIT hook:
+Your hook executable will need to run: "git fit --post-commit"
+
+The POST-CHECKOUT hook:
+Your hook executable will need to run: "git fit --post-checkout <ARG1> <ARG2> <ARG3>".
+The ARGs are positional command line arguments that git passes to the hook executable and
+git-fit uses them. If your hook executable is simply a shell script, the ARGs can be specified
+as $1 $2 $3.

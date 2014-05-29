@@ -7,43 +7,64 @@ import sys
 sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
 from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, readFitFile
-import status, hooks, objects, paths
+import status, hooks, objects, paths, merge
 import stat
 
 
 helpMsg='''
 git fit [--legend] [<paths>...]
 
-Show the fit state of the working copy and any detected problems. For any "git commit"
-issued on the working copy, fit will automatically update the commit to properly associate
-it with any changes to fit-managed items. Use the --legend option to not print an
-explanatory legend with status symbol meanings.
+Show the fit state of the working tree and any detected problems. Use the --legend option to
+print an explanatory legend with status symbol meanings. The items shown will be any of the
+following: items ADDED to fit (+), items being tracked that are DELETED from working
+directory (-), items being tracked that are MODIFIED (*), items tracked that are now marked to
+be UNTRACKED (~), items in the HEAD commit that may need to be UPLOADED (^), and any items that
+will abort a future git-commit (!). It is possible for any item to have more than one status
+type. For instance, if you commit a new fit file and then change it again (without having yet
+run --put), that item will show ^* as its status.
 
-git fit --restore
+git fit --save [<paths>...]
 
-The "--restore" option will irreversibly discard all uncommitted changes to your
-fit-managed items, bringing your working directory to a pristine condition (so use this
-option with caution). In other words, whatever changes you see in the "git fit" status
-output before running --restore, you will no longer see after running --restore.
+Update fit with current working tree changes to fit-tracked items. This will update the .fit
+file, which can them be "git add"-ed in preparation for a commit. After running this command,
+any items that were shown as modified, added, removed, or untracked (*, +, -, ~) by the status
+output of git fit will no longer be shown as such. However, commit-aborting items (!) and
+items that may need to be uploaded (^) will continue to be shown in the status.
 
-git fit --get [-s] [<paths>...]
+git fit --restore [-f] [<paths>...]
+
+Remove all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
+IRREVERSIBLY discard all uncommitted changes to your fit-tracked items, bringing your working
+tree to a pristine condition with respect to those objects currently being tracked by fit (so
+use this command with caution). In other words, whatever modified, added, or removed (*, +, -)
+items you see in the "git fit" status output before running --restore, you will no longer see
+after running --restore. Because of its destructive potential, the command must be run with
+the -f option for it to actually affect your working tree (otherwise it will just show dry-run
+summary and warning). The following changes will continue to be shown and cannot be "restored"
+with this command: items marked to be untracked from fit (~), items that may need to be
+uploaded (^), and any commit-aborting items (!).
+
+git fit --get [-s] [-q] [<paths>...]
 
 Begin the download of the missing, uncached items for the HEAD commit. Until this is done,
 any action in your project that requires the actual contents of these items will not work
 as expected. With the -s option, --get will only show a summary of what needs to be
 transferred. Optional <paths> can be specified to selectively download only certain items.
+Use -q to to turn off progress output for transfers.
 
-
-git fit --put [-s]
+git fit --put [-s] [-q]
 
 Begin the upload of fit objects that have been committed to git but are not present in the
 etxternal location. Until this is done, people who are using your commits will not have access
 to these items. With the -s option, --put will only show a summary of what needs to be
-transferred.
+transferred. Use -q to to turn off progress output for transfers. Note that sometimes an item
+may have "may need to be uploaded" status (^), but --put might not actually uploaded it
+because it already exists in the external location. Running --put will clear the item of this
+status in either case.
 '''
 
 
-def firstTimeRepoSetup():
+def firstTimeRepoSetup(fitTrackedData, nohooks=False):
     if exists(fitDir):
         return
 
@@ -59,23 +80,28 @@ def firstTimeRepoSetup():
     f.write('\n.fit\n')
     f.close()
 
-    f = open(joinpath(gitDir, 'hooks', 'pre-commit'), 'a')
+    objects.restoreItems(fitTrackedData)
+
+    if nohooks:
+        return
+
+    f = open(joinpath(gitDir, 'hooks', 'pre-commit'), 'w')
     f.write('\ngit fit --pre-commit\n')
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'pre-commit'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-
-    f = open(joinpath(gitDir, 'hooks', 'post-commit'), 'a')
+    
+    f = open(joinpath(gitDir, 'hooks', 'post-commit'), 'w')
     f.write('\ngit fit --post-commit\n')
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'post-commit'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
-
-    f = open(joinpath(gitDir, 'hooks', 'post-checkout'), 'a')
-    f.write('\ngit fit --post-checkout\n')
+    f = open(joinpath(gitDir, 'hooks', 'post-checkout'), 'w')
+    f.write('\ngit fit --post-checkout $1 $2 $3\n')
     f.close()
-    chmod(joinpath(gitDir, 'hooks', 'post-checkout'),  stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    chmod(joinpath(gitDir, 'hooks', 'post-checkout'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
-    hooks.postCheckout(readFitFile())
+def getPaths(fitTrackedData, pathArgs):
+    return paths.getValidFitPaths(pathArgs, fitTrackedData) if pathArgs else fitTrackedData.keys()
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -84,14 +110,17 @@ if __name__ == '__main__':
             exit(1)
     
     parser = argparse.ArgumentParser(prog='fit')
+    parser.add_argument('--no-hooks', action='store_true')
 
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--restore', action='store_true')
     group.add_argument('--legend', action='store_true')
+    group.add_argument('--save', action='store_true')
+    group.add_argument('--restore', action='store_true')
 
     group.add_argument('--get', action='store_true')
     group.add_argument('--put', action='store_true')
     parser.add_argument('-s', '--summary', action='store_true')
+    parser.add_argument('-q', '--quiet', action='store_true')
 
     # Undocumented --run-hook arguments. This allows git-hooking by simply
     # insering one-line commands like "git fit --run-hook-preCommit" into
@@ -99,34 +128,32 @@ if __name__ == '__main__':
     group.add_argument('--pre-commit', action='store_true')
     group.add_argument('--post-commit', action='store_true')
     group.add_argument('--post-checkout', action='store_true')
+    group.add_argument('--merge-driver', action='store_true')
 
-    parser.add_argument('paths', nargs='*')
+    parser.add_argument('remaining', nargs='*')
 
     opts = parser.parse_args()
 
     fitTrackedData = readFitFile()
-    validPaths = paths.getValidFitPaths(opts.paths, fitTrackedData) if opts.paths else fitTrackedData.keys()
 
-    firstTimeRepoSetup()
+    firstTimeRepoSetup(fitTrackedData, opts.no_hooks)
 
     if opts.pre_commit:
         hooks.preCommit(fitTrackedData)
     elif opts.post_commit:
         hooks.postCommit(fitTrackedData)
     elif opts.post_checkout:
-        hooks.postCheckout(fitTrackedData)
+        hooks.postCheckout(fitTrackedData, *(opts.remaining[:3]))
+    elif opts.merge_driver:
+        merge.mergeDriver(*(opts.remaining[:3]))
     elif opts.get:
         objects.loadstore()
-        objects.get(fitTrackedData, validPaths, summary=opts.summary)
+        objects.get(fitTrackedData, getPaths(fitTrackedData, opts.remaining), summary=opts.summary, quiet=opts.quiet)
     elif opts.put:
         objects.loadstore()
-        objects.put(fitTrackedData, summary=opts.summary)
+        objects.put(fitTrackedData, summary=opts.summary, quiet=opts.quiet)
     elif opts.restore:
-        hooks.postCheckout(fitTrackedData)
+        objects.restoreItems(fitTrackedData)
     else:
-        status.printStatus(fitTrackedData, validPaths, legend=opts.legend)
-
-'''
-- symlinks (just ignore for now)
-- size warning/limiting/cleanup
-'''
+        status.printStatus(fitTrackedData, getPaths(fitTrackedData, opts.remaining), legend=opts.legend)
+ 

@@ -1,5 +1,6 @@
 from subprocess import Popen as popen, PIPE
 import objects
+from os import environ, devnull
 
 _s3keys_from_odin_cmd='''
 python2.7 -c "
@@ -22,7 +23,10 @@ _TRANSFER_CHUNK_SIZE = 102400
 S3Connection = None
 def _getKeys():
     materialName = 'com.amazon.access.krf-dev-build-krf-git-1'
-    proc = popen(['ssh', 'krf.aka.amazon.com', _s3keys_from_odin_cmd.format(materialName)], stdout=PIPE)
+    userAndHost = 'krf.aka.amazon.com'
+    if 'KRFBUILD_USER' in environ and environ['KRFBUILD_USER']:
+        userAndHost = environ['KRFBUILD_USER'] + '@' + userAndHost
+    proc = popen(['ssh', '-o', 'StrictHostKeyChecking=no', userAndHost, _s3keys_from_odin_cmd.format(materialName)], stdout=PIPE, stderr=open(devnull, 'wb'))
     creds = proc.communicate()[0].split()
     if proc.returncode:
         raise Exception('Error getting AWS access credentials!')
