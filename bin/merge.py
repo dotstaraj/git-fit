@@ -1,71 +1,70 @@
 from fit import gitDirOperation, repoDir, readFitFile, writeFitFile
-from fit import mineFitFile, otherFitFile, conflictFile
-from os import path
+from fit import theirFitFile, conflictFile
+from os import path, remove
 from shutil import move
+from subprocess import Popen as popen, PIPE
+import re
 
 conflictMsg = '''
-********** git-fit found conflicts during the merge **********
-Either a merge, rebase, or other command requiring a merge caused
-conflicts in fit managed items. Fit has already handled non-
-conflicting changes, but the conflicts need to be manually
-resolved. SEE THE "FIT_MERGE" FILE in your project root directory
-for instructions on resolving the conflicts. Do not continue with
-the merge until these conflicts have been resolved!
-********** git-fit found conflicts during the merge **********
+************ git-fit found conflicts during the merge ************
+Either a merge, rebase, or other merge-based operation caused
+conflicts in fit-tracked items. Fit has already merged in the non-
+conflicting changes. However, the conflicts need to be manually
+resolved. A "FIT_MERGE" file has been created in the root of your
+project directory to facilitate this process, so take a look at
+that file for instructions on how to proceed. A commit will not be
+possible until all conflicts have been resolved as instructed in
+this "FIT_MERGE" file.
+************ git-fit found conflicts during the merge ************
 '''
 
 conflictIntructions = '''\
-# HOW TO RESOLVE THESE CONFLICTS:
-# For each conflicted item, there is a row below consisting of three columns:
+# Each row below indicates an item conflict and consists of the following three columns:
 #
-#   <"OUR"-CHANGE> | <"THEIR"-CHANGE> |  <ITEM_PATH>
+#      <SELECTION_ENTRY_BOX>  <"MINE"-CHANGE><"THEIR"-CHANGE>  <ITEM>
 #
-# Example rows:
+# Example:
+# (symbol meanings: "*" = "modified", "+" = "added", "-" = "removed")
 #
-#   * | - |  someDirectory/file1
-#   + | + |  directory2/file2
+#   []  *-  someDirectory/file1
+#   []  ++  directory2/file2
 #
-# (symbol meanings: "+" = "added", "-" = "removed", "*" = "modified")
+# Make your selections inside the [] boxes in the first column for EACH and EVERY row:
+# 
+#  - Enter [M] to select MINE change. This is equivalent to deleting the entire row.
+#  - Enter [T] to select THEIR change.
+#  - Enter [W] to select WORKING tree version of the item.
+#      If the item does not exist in the working tree, the resolution amounts to REMOVING the item
+#      from fit. When choosing this option, run "git fit" to verify an item's status if needed.
 #
-# Each conflict MUST be resolved by selecting the version of the item that
-# should be kept: "OUR" or "THEIR" (individual items cannot be manually
-# edited for resolution). For each row, make this selection by DELETING the
-# "OUR/THEIR"-CHANGE character for the version you want to DISCARD. The version
-# that is not deleted is the version that fit will apply. However, deleting an
-# entire row is equivalent to deleting "THEIR" (and thus # keeping "OUR") for
-# that item. Also, deleting the entire file is equivalent to choosing to
-# resolve ALL conflicts with "OUR".
-#
-# (1) Once a selection for EACH row has been made as described, save this file.
-# (2) Run "git fit --save", which will check for this conflict resolutions file
-#     and update the .fit file with the selected resolutions.
-# (3) Then simply "git add .fit" and continue with the merge/rebase/amend as
-#     normal (the .fit file is located in root project directory). If for any
-#     row(s) a selection has not been made or containes error, the attempted
-#     commit will be aborted.
+# Enter only the single character inside the boxes and do not modify any other part of the row.
 #
 # REMEMBER:
-# If these conflicts resulted from a git REBASE operation, then
-# "ours" and "theirs" refer to the OPPOSITE versions than what intuitively
-# makes sense from your point of view. In other words, for rebase, "ours"
-# refers to the version that you are bringing IN to your current branch. And
-# likewise, "theirs" refers to the version in YOUR current branch itself.
+# If these conflicts resulted from a git REBASE operation, then "mine" and "their" refer to the
+# OPPOSITE versions than what may intuitively make sense from your point of view. In other words,
+# for rebase, "mine" refers to the version that you'd be bringing INTO your current branch. And, 
+# likewise, "their" actually refers to YOUR version that's already in the current branch itself.
+
+# ==> 1. Make your selections below.
+# ==> 2. Run "git fit --save".
+# ==> 3. Proceed with merge as normal.
 
 '''.split('\n')
 
+_conflictLine_re = re.compile('\s*\[([MTW]?)\]\s+(\*\*|\+\+|\*-|-\*)\s+(.+)\s*$')
 
 def mergeDriver(common, mine, other):
-    merged = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
-    writeFitFile(merged['fit'], mine)
+    merged, conflicts = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
 
-    if merged['conflicts']:
-        writeConflictFile(merged['conflicts'])
-        move(mine, mineFitFile)
-        move(other, otherFitFile)
-        print conflictMsg
-        exit(1)
+    if not conflicts:
+        writeFitFile(merged, mine)
+        exit(0)
 
-    exit(0)
+    writeFitFile(merged)
+    writeConflictFile(conflicts)
+    move(other, theirFitFile)
+    print conflictMsg
+    exit(1)
 
 def fitDiff(old, new):
     oldItems = set(old)
@@ -73,64 +72,94 @@ def fitDiff(old, new):
 
     added = newItems - oldItems
     removed = oldItems - newItems
-    modified = {i for i in (oldItems & newItems) if old[i][0] != new[i][0]}
+    modified = {i for i in (oldItems & newItems) if old[i] != new[i]}
 
     return added,removed,modified
 
 @gitDirOperation(repoDir)
 def writeConflictFile(conflicts):
-    lines =  [('+ | +', c) for c in conflicts['add']]
-    lines += [('* | *', c) for c in conflicts['mod']]
-    lines += [('* | -', c) for c in conflicts['modRem']]
-    lines += [('- | *', c) for c in conflicts['remMod']]
+    lines =  [('++', c) for c in conflicts['add']]
+    lines += [('**', c) for c in conflicts['mod']]
+    lines += [('*-', c) for c in conflicts['modRem']]
+    lines += [('-*', c) for c in conflicts['remMod']]
 
     lines.sort(key=lambda a: a[1])
 
     fileout = open(conflictFile, 'w')
     fileout.write('\n'.join(conflictIntructions))
-    fileout.write('\n'.join(["  %s |  %s"%l for l in lines]))
+    fileout.write('\n'.join(["[]  %s  %s"%l for l in lines]))
     fileout.close()
 
 def isConflictLineError(l):
     return len(l) != 3 or len(l[0]) > 1 or len(l[1]) > 1 or len(l[0]) == 0 and len(l[1]) == 0
 
 @gitDirOperation(repoDir)
-def getConflictResolutions():
-    if not path.exists(conflictFile):
-        return None
-
-    lines = [(i+1, l.strip()) for i,l in enumerate(open(conflictFile).readlines()) if not l.startswith('#')]
-    lines = {(i,tuple(c.strip() for c in l.split('|'))) for i,l in lines if l != ''}
-
-
-    errors = {(i,l) for i,l in lines if isConflictLineError(l)}
-    lines -= errors
-    unresolved = {(i,l) for i,l in lines if len(l[0]) != 0 and len(l[1]) != 0}
-    lines -= unresolved
-
-    mine = readFitFile(mineFitFile)
-    other = readFitFile(otherFitFile)
-
-    added = []
+def resolve(fitTrackedData):
     removed = []
-    for tmp,(tmp, change, item) in lines:
-        if change == '':
-            continue
-        if change == '-':
-            removed.append(item)
-        else:
-            added.append((item, other[item]))
+    added = []
+    working = []
 
-    return {'errors': errors or None, 'unresolved': unresolved or None, 'removed': removed, 'added': added}
+    other = readFitFile(theirFitFile)
+
+    for n,l in enumerate(open(conflictFile).readlines()):
+        if l.startswith('#'):
+            continue
+        l = l.strip()
+        if l == '':
+            continue
+
+        match = _conflictLine_re.match(l)
+        if not match:
+            print 'error: Line %d in the FIT_MERGE file has an error. Cannot continue...'%(n + 1)
+            return
+
+        resolution, change, item = match.groups()
+        if resolution == '':
+            print 'error: No selection has been made for item on line %d in the FIT_MERGE file. Cannot continue...'%(n + 1)
+            return
+
+        resolution = resolution[1].upper()
+        change = change[1]
+
+        if resolution == 'T':
+            if change == '-':
+                removed.append(item)
+            else:
+                added.append((item, other[item]))
+        elif resolution == 'W':
+            working.append(item)
+
+    for i in removed:
+        del fitTrackedData[i]
+    fitTrackedData.update(added)
+
+    cleanupMergeArtifacts()
+
+    if len(working) > 0:
+        print '"[W]orking-tree" was selected for some conflicts.'
+        return working
+
+def cleanupMergeArtifacts():
+    if path.exists(conflictFile):
+        remove(conflictFile)
+    if path.exists(theirFitFile):
+        remove(theirFitFile)
+
+@gitDirOperation(repoDir)
+def isMergeInProgress():
+    if not path.exists(conflictFile):
+        return False
+    fitFileStatus = popen('git status --porcelain .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[0]
+    return 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
 
 def getMergedFit(common, mine, other):
     mineAdd,mineRem,mineMod = fitDiff(common, mine)
     otherAdd,otherRem,otherMod = fitDiff(common, other)
 
-    addCon = {i for i in (mineAdd & otherAdd) if mine[i][0] != other[i][0]}
-    modCon = {i for i in (mineMod & otherMod) if mine[i][0] != other[i][0]}
+    addCon = {i for i in (mineAdd & otherAdd) if mine[i] != other[i]}
+    modCon = {i for i in (mineMod & otherMod) if mine[i] != other[i]}
     modRemCon = mineMod & otherRem
-    remModCon = otherMod & mineRem
+    remModCon = mineRem & otherMod
 
     allCon = addCon | modCon | modRemCon | remModCon
     
@@ -139,14 +168,14 @@ def getMergedFit(common, mine, other):
     for i in (otherRem - mineRem) - allCon:
         del mine[i]
 
-    result = {'conflicts': None, 'fit': mine}
+    conflicts = None
     
     if len(allCon) > 0:
-        result['conflicts'] = {
+        conflicts = {
             'add': addCon,
             'mod': modCon,
             'modRem': modRemCon,
             'remMod': remModCon
         }
 
-    return result
+    return mine, conflicts

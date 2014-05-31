@@ -1,8 +1,8 @@
-from fit import gitDirOperation, repoDir, fitDir, cacheDir, syncDir, getChangedItems
-from fit import refreshStats
+from fit import gitDirOperation, repoDir, fitDir, cacheDir, syncDir, refreshStats
+from paths import getValidFitPaths
 from subprocess import Popen as popen
 from os.path import dirname, basename, exists, join as joinpath, getsize
-from os import walk, makedirs, remove
+from os import walk, makedirs
 from shutil import copyfile, move
 from sys import stdout
 
@@ -27,13 +27,13 @@ class Store:
         pass
 
 @gitDirOperation(repoDir)
-def _getObjectInfo(objName):
+def getObjectInfo(objName):
     obj = joinpath(objName[:2], objName[2:])
     return obj, joinpath(cacheDir, obj), joinpath(syncDir, obj)
 
 @gitDirOperation(repoDir)
 def findObject(objName):
-    obj, objInCache, objToSync = _getObjectInfo(objName)
+    obj, objInCache, objToSync = getObjectInfo(objName)
     if exists(objToSync):
         return objToSync
     elif exists(objInCache):
@@ -43,62 +43,11 @@ def findObject(objName):
 
 @gitDirOperation(repoDir)
 def placeObject(objName, source):
-    obj, objInCache, objToSync = _getObjectInfo(objName)
+    obj, objInCache, objToSync = getObjectInfo(objName)
 
     if not (exists(objInCache) or exists(objToSync)):
         popen(('mkdir -p %s'%dirname(objToSync)).split()).wait()
         popen(('cp %s %s'%(source, objToSync)).split()).wait()
-
-@gitDirOperation(repoDir)
-def getUnsyncedObjects():
-    objects = []
-
-    for root, dirs, files in walk(syncDir):
-        for f in files:
-            objPath = joinpath(root,f)
-            objects.append(basename(dirname(objPath))+basename(objPath))
-    
-    return objects
-
-@gitDirOperation(repoDir)
-def restoreItems(fitTrackedData):
-    modified, added, removed, untracked = getChangedItems(fitTrackedData)
-
-    for i in added:
-        print 'Removing: %s'%i
-        remove(i)
-
-    itemsToRestore = set(modified)
-    itemsToRestore.update(set(removed))
-    missing = 0
-    count = 0
-    total = len(itemsToRestore)
-    touched = {}
-    for filePath in itemsToRestore:
-        count += 1
-        stdout.flush()
-
-        objHash = fitTrackedData[filePath][0]
-        objPath = findObject(objHash)
-        fileDir = dirname(filePath)
-        fileDir and (exists(fileDir) or makedirs(fileDir))
-        if objPath:
-            print 'Restoring: %s'%filePath
-            copyfile(objPath, filePath)
-            touched[filePath] = objHash
-        else:
-            print 'Restoring (empty): %s'%filePath
-            open(filePath, 'w').close()  #write a 0-byte file as placeholder
-            missing += 1
-    print
-
-    refreshStats(touched)
-
-    if missing > 0:
-        print '* git-fit: %d of the fit objects were restored with empty stub files because they'%missing
-        print '* are not cached and must be downloaded for the HEAD commit.'
-        print '* To download them, run "git fit --get". Optionally, provide paths to this command'
-        print '* to selectively download only the objects you want.\n'
 
 class _ProgressPrinter:
     def __init__(self):
@@ -141,22 +90,23 @@ class _QuietProgressPrinter:
     def setTotalSize(self, totalSize):
         pass
 
-
-def get(fitTrackedData, paths, summary=False, quiet=False):
+def get(fitTrackedData, pathArgs=None, summary=False, quiet=False):
     global _fitstore
-    needed = []   # not in working tree nor in cache, must be downloaded
     
-    if len(fitTrackedData) == 0 or len(paths) == 0:
+    allItems = fitTrackedData.keys()
+    validPaths = getValidFitPaths(pathArgs, allItems) if pathArgs else allItems
+    if len(fitTrackedData) == 0 or len(validPaths) == 0:
         return
 
     pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
     store = _fitstore.Store(pp.updateProgress)
 
+    needed = []   # not in working tree nor in cache, must be downloaded
     touched = {}
     
-    for filePath in paths:
+    for filePath in validPaths:
         objHash, size = fitTrackedData[filePath]
-        if not exists(filePath) or getsize(filePath) == 0:
+        if exists(filePath) and getsize(filePath) == 0:
             objPath = findObject(objHash)
             fileDir = dirname(filePath)
             fileDir and (exists(fileDir) or makedirs(fileDir))
@@ -164,7 +114,7 @@ def get(fitTrackedData, paths, summary=False, quiet=False):
                 copyfile(objPath, filePath)
                 touched[filePath] = objHash
             else:
-                obj, objInCache, objToSync = _getObjectInfo(objHash)
+                obj, objInCache, objToSync = getObjectInfo(objHash)
                 needed.append((filePath, obj, objHash, objInCache, size))
 
     totalSize = sum([size for f,k,h,o,size in needed])
@@ -172,13 +122,14 @@ def get(fitTrackedData, paths, summary=False, quiet=False):
 
     if summary:
         if len(needed):
-            print len(paths), 'items are being tracked'
+            print len(validPaths), 'items are being tracked'
             print len(needed), 'of the tracked items are not cached locally (need to be downloaded)'
             print '%.2fMB in total can be downloaded'%(totalSize/1048576)
         else:
             print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
     else:
         errors = []
+        needed.sort()
         for filePath,key,objHash,objPath,size in needed:
             pp.newItem(filePath, size)
             
@@ -206,16 +157,16 @@ def get(fitTrackedData, paths, summary=False, quiet=False):
 
 def put(fitTrackedData, summary=False, quiet=False):
     global _fitstore
-    available = []   # not in external location, must be uploaded
     
     if len(fitTrackedData) == 0:
         return
 
     pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
     store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
-    
+
+    available = []   # not in external location, must be uploaded
     for filePath,(objHash, size) in fitTrackedData.iteritems():
-        obj, objInCache, objToSync = _getObjectInfo(objHash)
+        obj, objInCache, objToSync = getObjectInfo(objHash)
         objPath = findObject(objHash)
 
         if objPath == objToSync:
@@ -232,7 +183,8 @@ def put(fitTrackedData, summary=False, quiet=False):
         else:
             print 'No tranfers needed! There are no objects to put in external location for HEAD commit.'
     else:
-        errors = []      
+        errors = []
+        available.sort()
         for filePath,keyName,objPath,objInCache,size in available:
             pp.newItem(filePath, size)
             if exists(objPath):

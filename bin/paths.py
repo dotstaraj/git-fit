@@ -28,22 +28,24 @@ def addFitItemsToList(path, node, items):
         else:
             nodes.extend([FitNode(node.parentPath + '/' + k, v) for k,v in node.children.iteritems()])            
 
-def getValidFitPaths(paths, fitTrackedData):
+def getValidFitPaths(given, available):
+    if not paths:
+        return None
+
     # Normalize the user-entered paths into canonical paths
     # relative to repo root
-    paths = {relpath(realpath(p), repoDir) for p in paths}
+    given = {relpath(realpath(p), repoDir) for p in given}
 
-    fitPathTree = getPathTree(fitTrackedData.keys())
+    if '.' in given:
+        return available        
+
+    fitPathTree = getPathTree(available)
 
     # Generate list of individual fit items under user-given paths
     validPaths = []
-    for p in paths:
+    for p in given:
         if p.startswith('../'):
             print '(...skipping path not under repo: %s)'%p
-            continue
-
-        if p == '.':
-            validPaths.extend(fitTrackedData.keys())
             continue
 
         # Determine if normalized user-given path is one that

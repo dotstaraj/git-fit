@@ -4,17 +4,18 @@ import argparse
 from os import getcwd, chdir, mkdir, chmod
 from os.path import dirname, realpath, relpath, join as joinpath, exists
 import sys
+from subprocess import call
 sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
-from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, readFitFile
-import status, hooks, objects, paths, merge
+from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, readFitFile, firstTimeFile
+import hooks, objects, merge, changes
 import stat
 
 
 helpMsg='''
 git fit [--legend] [<paths>...]
 
-Show the fit state of the working tree and any detected problems. Use the --legend option to
+Shows the fit state of the working tree and any detected problems. Use the --legend option to
 print an explanatory legend with status symbol meanings. The items shown will be any of the
 following: items ADDED to fit (+), items being tracked that are DELETED from working
 directory (-), items being tracked that are MODIFIED (*), items tracked that are now marked to
@@ -25,15 +26,15 @@ run --put), that item will show ^* as its status.
 
 git fit --save [<paths>...]
 
-Update fit with current working tree changes to fit-tracked items. This will update the .fit
-file, which can them be "git add"-ed in preparation for a commit. After running this command,
-any items that were shown as modified, added, removed, or untracked (*, +, -, ~) by the status
-output of git fit will no longer be shown as such. However, commit-aborting items (!) and
-items that may need to be uploaded (^) will continue to be shown in the status.
+Updates fit with current working tree changes to fit-tracked items. This will update and
+git-add the .fit file. After running this command, any items that were shown as modified,
+added, removed, or untracked (*, +, -, ~) by the status output of git fit will no longer be
+shown as such. However, commit-aborting items (!) and items that may need to be uploaded (^)
+will continue to be shown in the status.
 
 git fit --restore [-f] [<paths>...]
 
-Remove all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
+Discards all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
 IRREVERSIBLY discard all uncommitted changes to your fit-tracked items, bringing your working
 tree to a pristine condition with respect to those objects currently being tracked by fit (so
 use this command with caution). In other words, whatever modified, added, or removed (*, +, -)
@@ -46,41 +47,56 @@ uploaded (^), and any commit-aborting items (!).
 
 git fit --get [-s] [-q] [<paths>...]
 
-Begin the download of the missing, uncached items for the HEAD commit. Until this is done,
-any action in your project that requires the actual contents of these items will not work
-as expected. With the -s option, --get will only show a summary of what needs to be
-transferred. Optional <paths> can be specified to selectively download only certain items.
-Use -q to to turn off progress output for transfers.
+Downloads the missing, uncached items for the HEAD commit. Until this is done, any action in
+your project that requires the actual contents of these items will not work as expected. With
+the -s option, --get will only show a summary of what needs to be transferred. Optional <paths>
+can be specified to selectively download only certain items. Use -q to to turn off progress
+output for transfers.
 
 git fit --put [-s] [-q]
 
-Begin the upload of fit objects that have been committed to git but are not present in the
-etxternal location. Until this is done, people who are using your commits will not have access
-to these items. With the -s option, --put will only show a summary of what needs to be
-transferred. Use -q to to turn off progress output for transfers. Note that sometimes an item
-may have "may need to be uploaded" status (^), but --put might not actually uploaded it
-because it already exists in the external location. Running --put will clear the item of this
-status in either case.
+Uploads fit items that have been committed to git but are not present in the external location.
+Until this is done, people who are using your commits will not have access to these items. With
+the -s option, --put will only show a summary of what may need to be transferred. Use -q to to
+turn off progress output for transfers. Keep in mind that the ^ status only means that items
+may *possibly* need to be uploaded. If those items already exist in the external store due to a
+previous upload (either by you or someone else), --put will not upload the item again. Instead,
+the item will simply be cleared of this status.
 '''
 
+# This will be used to check whether we need to run (or re-run after changes to git-fit)
+# this first-time repo setup
+_firstTimeCounter = 0
 
 def firstTimeRepoSetup(fitTrackedData, nohooks=False):
-    if exists(fitDir):
-        return
+    if not exists(fitDir):
+        mkdir(fitDir)
+        mkdir(cacheDir)
+        mkdir(syncDir)
+        objects.restoreItems(fitTrackedData)
+    elif exists(firstTimeFile):
+        firstTimeCount = int(open(firstTimeFile).read())
 
-    mkdir(fitDir)
-    mkdir(cacheDir)
-    mkdir(syncDir)
+        if firstTimeCount == _firstTimeCounter:
+            return
 
-    f = open(joinpath(gitDir, 'info', 'attributes'), 'a')
-    f.write('\n.fit -fit\n')
+        if firstTimeCount > _firstTimeCounter:
+            print 'You are running a version of git-fit that is OLDER than the version with which'
+            print 'this repo has been used before. Please check that your PATH points to the'
+            print 'latest copy of git-fit you have on your system. git-fit will now exit...'
+            exit(1)
+
+    f = open(firstTimeFile, 'w')
+    f.write("%d"%_firstTimeCounter)
     f.close()
 
-    f = open(joinpath(gitDir, 'info', 'exclude'), 'a')
+    f = open(joinpath(gitDir, 'info', 'attributes'), 'w')
+    f.write('\n.fit -fit merge=fitfile\n')
+    f.close()
+
+    f = open(joinpath(gitDir, 'info', 'exclude'), 'w')
     f.write('\n.fit\n')
     f.close()
-
-    objects.restoreItems(fitTrackedData)
 
     if nohooks:
         return
@@ -100,8 +116,11 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'post-checkout'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
-def getPaths(fitTrackedData, pathArgs):
-    return paths.getValidFitPaths(pathArgs, fitTrackedData) if pathArgs else fitTrackedData.keys()
+    cmd = '''
+        git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
+        git config merge.fitfile.driver 'git fit --merge-driver %O %A %B'
+    '''
+    call('set -e\n' + cmd, shell=True)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -116,6 +135,7 @@ if __name__ == '__main__':
     group.add_argument('--legend', action='store_true')
     group.add_argument('--save', action='store_true')
     group.add_argument('--restore', action='store_true')
+    parser.add_argument('-f', '--force', action='store_true')
 
     group.add_argument('--get', action='store_true')
     group.add_argument('--put', action='store_true')
@@ -134,6 +154,14 @@ if __name__ == '__main__':
 
     opts = parser.parse_args()
 
+    if opts.force and not opts.restore:
+        print 'error: the -f/--force option can only be used with --restore'
+        exit(1)
+    if not opts.force and opts.restore:
+        print 'The --restore option must be run together with -f/--force. To verify what objects'
+        print 'would be affected by --restore -f, run git fit to output current status of objects.'
+        exit()
+
     fitTrackedData = readFitFile()
 
     firstTimeRepoSetup(fitTrackedData, opts.no_hooks)
@@ -148,12 +176,14 @@ if __name__ == '__main__':
         merge.mergeDriver(*(opts.remaining[:3]))
     elif opts.get:
         objects.loadstore()
-        objects.get(fitTrackedData, getPaths(fitTrackedData, opts.remaining), summary=opts.summary, quiet=opts.quiet)
+        objects.get(fitTrackedData, pathArgs=pathArgs, summary=opts.summary, quiet=opts.quiet)
     elif opts.put:
         objects.loadstore()
         objects.put(fitTrackedData, summary=opts.summary, quiet=opts.quiet)
     elif opts.restore:
-        objects.restoreItems(fitTrackedData)
+        changes.restore(fitTrackedData, pathArgs=pathArgs)
+    elif opts.save:
+        changes.save(fitTrackedData, pathArgs=pathArgs)
     else:
-        status.printStatus(fitTrackedData, getPaths(fitTrackedData, opts.remaining), legend=opts.legend)
+        changes.printStatus(fitTrackedData, pathArgs=pathArgs, legend=opts.legend)
  

@@ -13,7 +13,7 @@ commands, with the full set of options, are:
 
 git fit [--legend] [<paths>...]
 
-Show the fit state of the working tree and any detected problems. Use the --legend option to
+Shows the fit state of the working tree and any detected problems. Use the --legend option to
 print an explanatory legend with status symbol meanings. The items shown will be any of the
 following: items ADDED to fit (+), items being tracked that are DELETED from working
 directory (-), items being tracked that are MODIFIED (*), items tracked that are now marked to
@@ -24,15 +24,15 @@ run --put), that item will show ^* as its status.
 
 git fit --save [<paths>...]
 
-Update fit with current working tree changes to fit-tracked items. This will update the .fit
-file, which can them be "git add"-ed in preparation for a commit. After running this command,
-any items that were shown as modified, added, removed, or untracked (*, +, -, ~) by the status
-output of git fit will no longer be shown as such. However, commit-aborting items (!) and
-items that may need to be uploaded (^) will continue to be shown in the status.
+Updates fit with current working tree changes to fit-tracked items. This will update and
+git-add the .fit file. After running this command, any items that were shown as modified,
+added, removed, or untracked (*, +, -, ~) by the status output of git fit will no longer be
+shown as such. However, commit-aborting items (!) and items that may need to be uploaded (^)
+will continue to be shown in the status.
 
 git fit --restore [-f] [<paths>...]
 
-Remove all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
+Discards all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
 IRREVERSIBLY discard all uncommitted changes to your fit-tracked items, bringing your working
 tree to a pristine condition with respect to those objects currently being tracked by fit (so
 use this command with caution). In other words, whatever modified, added, or removed (*, +, -)
@@ -45,22 +45,21 @@ uploaded (^), and any commit-aborting items (!).
 
 git fit --get [-s] [-q] [<paths>...]
 
-Begin the download of the missing, uncached items for the HEAD commit. Until this is done,
-any action in your project that requires the actual contents of these items will not work
-as expected. With the -s option, --get will only show a summary of what needs to be
-transferred. Optional <paths> can be specified to selectively download only certain items.
-Use -q to to turn off progress output for transfers.
+Downloads the missing, uncached items for the HEAD commit. Until this is done, any action in
+your project that requires the actual contents of these items will not work as expected. With
+the -s option, --get will only show a summary of what needs to be transferred. Optional <paths>
+can be specified to selectively download only certain items. Use -q to to turn off progress
+output for transfers.
 
 git fit --put [-s] [-q]
 
-Begin the upload of fit objects that have been committed to git but are not present in the
-etxternal location. Until this is done, people who are using your commits will not have access
-to these items. With the -s option, --put will only show a summary of what needs to be
-transferred. Use -q to to turn off progress output for transfers. Note that sometimes an item
-may have "may need to be uploaded" status (^), but --put might not actually uploaded it
-because it already exists in the external location. Running --put will clear the item of this
-status in either case.
-'''
+Uploads fit items that have been committed to git but are not present in the external location.
+Until this is done, people who are using your commits will not have access to these items. With
+the -s option, --put will only show a summary of what may need to be transferred. Use -q to to
+turn off progress output for transfers. Keep in mind that the ^ status only means that items
+may *possibly* need to be uploaded. If those items already exist in the external store due to a
+previous upload (either by you or someone else), --put will not upload the item again. Instead,
+the item will simply be cleared of this status.
 
 
 

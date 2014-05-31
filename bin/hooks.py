@@ -1,6 +1,7 @@
-from fit import getStagedOffenders, getChangedItems, fitFile
-from fit import gitDirOperation, repoDir
+from fit import fitFile, writeFitFile, gitDirOperation, repoDir
+from changes import getStagedOffenders
 from objects import findObject, placeObject
+from merge import cleanupMergeArtifacts
 from subprocess import PIPE, Popen as popen
 from textwrap import fill as wrapline
 from os import stat
@@ -28,51 +29,23 @@ def postCheckout(fitTrackedData, oldRef, newRef, branch):
 
 @gitDirOperation(repoDir)
 def postCommit(fitTrackedData):
-    pass
+    cleanupMergeArtifacts()
+    # 1 notify warning if they have changes not committed
+    # 2 cache items commmited
 
 @gitDirOperation(repoDir)
 def preCommit(fitTrackedData):
     offenders = getStagedOffenders()
-    if any(len(l) > 0 for l in offenders):
-        conflict = [('F ', i) for i in offenders[0]]
-        binary = [('B ', i) for i in offenders[1]]
-        
-        print '\n'.join([wrapline(l) for l in infoMsg[:4]])
-        for c,f in sorted(conflict+binary, key=lambda i: i[1]):
-            print '   ', c, f
-        print '\n'.join([wrapline(l) for l in infoMsg[5:]])
 
-        exit(1)
-
-
-
-    print 'git-fit: Checking for changes...',
-    changed = getChangedItems(fitTrackedData)
-    print 'Done.'
-    if sum(len(l) for l in changed) == 0:
+    if all(len(l) == 0 for l in offenders):
         exit(0)
 
-    modified, added, removed, untracked = changed
+    conflict = [('F ', i) for i in offenders[0]]
+    binary = [('B ', i) for i in offenders[1]]
+    
+    print '\n'.join([wrapline(l) for l in infoMsg[:4]])
+    for c,f in sorted(conflict+binary, key=lambda i: i[1]):
+        print '   ', c, f
+    print '\n'.join([wrapline(l) for l in infoMsg[5:]])
 
-    print 'git-git: Computing hashes for new items...',
-    sizes = [s.st_size for s in [stat(f) for f in added]]
-    p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
-    added = zip(added, zip(p.communicate('\n'.join(added))[0].strip().split('\n'), sizes))
-    print 'Done.'
-
-    for i in removed:
-        del fitTrackedData[i]
-    for i in untracked:
-        del fitTrackedData[i]
-
-    fitTrackedData.update(modified)
-    fitTrackedData.update(added)
-
-    print 'git-fit: Caching new and modified items...',
-    added.update(modified)
-    for filePath,(objHash, size) in added:
-        placeObject(objHash, filePath)
-    print 'Done.'
-
-    writeFitFile(fitTrackedData)
-    popen('git add -f'.split()+[fitFile]).wait()
+    exit(1)
