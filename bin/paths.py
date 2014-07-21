@@ -29,7 +29,7 @@ def addFitItemsToList(path, node, items):
             nodes.extend([FitNode(node.parentPath + '/' + k, v) for k,v in node.children.iteritems()])            
 
 def getValidFitPaths(given, available):
-    if not paths:
+    if not given:
         return None
 
     # Normalize the user-entered paths into canonical paths

@@ -20,6 +20,7 @@ conflictFile = path.join(repoDir, 'FIT_MERGE')
 theirFitFile = path.join(fitDir, 'merge-their')
 firstTimeFile = path.join(fitDir, 'first-time')
 savedFile = path.join(fitDir, 'save')
+tempDir = path.join(fitDir, 'temp')
 
 # Parameterized decorator that will wrap the decoratee with a cd into the git directory
 # before running the operation, and a cd back into the starting directory afterwards.

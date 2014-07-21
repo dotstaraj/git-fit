@@ -24,30 +24,30 @@ conflictIntructions = '''\
 #      <SELECTION_ENTRY_BOX>  <"MINE"-CHANGE><"THEIR"-CHANGE>  <ITEM>
 #
 # Example:
-# (symbol meanings: "*" = "modified", "+" = "added", "-" = "removed")
+# (symbol meanings: "*" = modified, "+" = added, "-" = removed)
 #
 #   []  *-  someDirectory/file1
 #   []  ++  directory2/file2
 #
-# Make your selections inside the [] boxes in the first column for EACH and EVERY row:
+# Make your selections inside the [] boxes in the first column for EACH and EVERY row
+# by entering only a SINGLE letter inside []:
 # 
 #  - Enter [M] to select MINE change. This is equivalent to deleting the entire row.
 #  - Enter [T] to select THEIR change.
 #  - Enter [W] to select WORKING tree version of the item.
 #      If the item does not exist in the working tree, the resolution amounts to REMOVING the item
-#      from fit. When choosing this option, run "git fit" to verify an item's status if needed.
+#      from fit. When choosing [W], "git fit" may be run to verify an item's status if needed.
 #
-# Enter only the single character inside the boxes and do not modify any other part of the row.
-#
+
 # REMEMBER:
 # If these conflicts resulted from a git REBASE operation, then "mine" and "their" refer to the
 # OPPOSITE versions than what may intuitively make sense from your point of view. In other words,
 # for rebase, "mine" refers to the version that you'd be bringing INTO your current branch. And, 
 # likewise, "their" actually refers to YOUR version that's already in the current branch itself.
 
-# ==> 1. Make your selections below.
-# ==> 2. Run "git fit --save".
-# ==> 3. Proceed with merge as normal.
+# ==> 1. Make your selections (M or T or W) below.
+# ==> 2. Run "git fit save".
+# ==> 3. Proceed with the merge process in git as normal.
 
 '''.split('\n')
 
@@ -90,9 +90,6 @@ def writeConflictFile(conflicts):
     fileout.write('\n'.join(["[]  %s  %s"%l for l in lines]))
     fileout.close()
 
-def isConflictLineError(l):
-    return len(l) != 3 or len(l[0]) > 1 or len(l[1]) > 1 or len(l[0]) == 0 and len(l[1]) == 0
-
 @gitDirOperation(repoDir)
 def resolve(fitTrackedData):
     removed = []
@@ -118,7 +115,7 @@ def resolve(fitTrackedData):
             print 'error: No selection has been made for item on line %d in the FIT_MERGE file. Cannot continue...'%(n + 1)
             return
 
-        resolution = resolution[1].upper()
+        resolution = resolution.upper()
         change = change[1]
 
         if resolution == 'T':
@@ -135,9 +132,7 @@ def resolve(fitTrackedData):
 
     cleanupMergeArtifacts()
 
-    if len(working) > 0:
-        print '"[W]orking-tree" was selected for some conflicts.'
-        return working
+    return working
 
 def cleanupMergeArtifacts():
     if path.exists(conflictFile):
@@ -150,7 +145,12 @@ def isMergeInProgress():
     if not path.exists(conflictFile):
         return False
     fitFileStatus = popen('git status --porcelain .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[0]
-    return 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
+    merging = 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
+
+    if not merging and path.exists(conflictFile):
+        cleanupMergeArtifacts()
+
+    return merging
 
 def getMergedFit(common, mine, other):
     mineAdd,mineRem,mineMod = fitDiff(common, mine)

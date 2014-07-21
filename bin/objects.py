@@ -1,10 +1,11 @@
-from fit import gitDirOperation, repoDir, fitDir, cacheDir, syncDir, refreshStats
+from fit import gitDirOperation, repoDir, fitDir, cacheDir, syncDir, refreshStats, tempDir
 from paths import getValidFitPaths
 from subprocess import Popen as popen
 from os.path import dirname, basename, exists, join as joinpath, getsize
 from os import walk, makedirs
 from shutil import copyfile, move
 from sys import stdout
+from tempfile import mkstemp
 
 
 _fitstore = None
@@ -56,14 +57,22 @@ class _ProgressPrinter:
         self.size_done = 0
         self.item_name = ''
 
-    def updateProgress(self, done, size):
-        fmt_args = (
+    def updateProgress(self, done, size, custom_item_string=None):
+        if custom_item_string:
+            fmt_args = (
+                (self.size_done+done)*100./self.size_total,
+                custom_item_string,
+                self.item_name
+            )
+            print '\rOverall: %6.2f%%    %s   %s'%fmt_args,
+        else:
+            fmt_args = (
                 (self.size_done+done)*100./self.size_total,
                 self.size_item/1048576.,
                 done*100./size,
                 self.item_name
-        )
-        print '\rOverall: %6.2f%%    %7.3f MB   %6.2f%%   %s'%fmt_args,
+            )
+            print '\rOverall: %6.2f%%    %7.3f MB   %6.2f%%   %s'%fmt_args,
         stdout.flush()
     def newItem(self, name, size):
         if self.size_item:
@@ -90,7 +99,7 @@ class _QuietProgressPrinter:
     def setTotalSize(self, totalSize):
         pass
 
-def get(fitTrackedData, pathArgs=None, summary=False, quiet=False):
+def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False):
     global _fitstore
     
     allItems = fitTrackedData.keys()
@@ -99,7 +108,6 @@ def get(fitTrackedData, pathArgs=None, summary=False, quiet=False):
         return
 
     pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
-    store = _fitstore.Store(pp.updateProgress)
 
     needed = []   # not in working tree nor in cache, must be downloaded
     touched = {}
@@ -120,14 +128,24 @@ def get(fitTrackedData, pathArgs=None, summary=False, quiet=False):
     totalSize = sum([size for f,k,h,o,size in needed])
     pp.setTotalSize(totalSize)
 
-    if summary:
-        if len(needed):
-            print len(validPaths), 'items are being tracked'
-            print len(needed), 'of the tracked items are not cached locally (need to be downloaded)'
-            print '%.2fMB in total can be downloaded'%(totalSize/1048576)
-        else:
-            print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
+    if len(needed) == 0:
+        print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
+    elif verbose:
+        print
+        for filePath,key,objHash,objPath,size in needed:
+            print '  %.2fMB  %s'%(size/1048576, filePath)
+        print '\nThe above objects can be tranferred. Total transfer size: %.2fMB'%(totalSize/1048576)
+    elif summary:
+        print len(validPaths), 'items are being tracked'
+        print len(needed), 'of the tracked items are not cached locally (need to be downloaded)'
+        print '%.2fMB in total can be downloaded'%(totalSize/1048576)
+        print 'Run \'git fit get -v\' to list these items.'
     else:
+        try:
+            store = _fitstore.Store(pp.updateProgress)
+        except Exception as e:
+            print e
+            return
         errors = []
         needed.sort()
         for filePath,key,objHash,objPath,size in needed:
@@ -136,16 +154,25 @@ def get(fitTrackedData, pathArgs=None, summary=False, quiet=False):
             # Copy download to temp file first, and then to actual object location
             # This is to prevent interrupted downloads from causing bad objects to be placed
             # in the objects cache
-            tempTransferFile = joinpath(fitDir, '.tempTransfer')
+            (tempHandle, tempTransferFile) = mkstemp(dir=tempDir)
+            tempHandle.close()
             key = store.check(key)
-            if key and store.get(key, tempTransferFile, size):
+
+            try:
+                transferred = store.get(key, tempTransferFile, size)
+            except:
+                transferred = False
+            if key and transferred:
+                pp.updateProgress(size, size)
                 popen(['mkdir', '-p', dirname(objPath)]).wait()
                 popen(['mv', tempTransferFile, objPath]).wait()
                 popen(['cp', objPath, filePath]).wait()
                 touched[filePath] = objHash
             else:
                 errors.append(filePath)
+
         pp.done()
+        store.close()
 
         if len(errors) > 0:
             print 'Some items could not be transferred:'
@@ -153,16 +180,14 @@ def get(fitTrackedData, pathArgs=None, summary=False, quiet=False):
             print 'Above items could not be transferred:'
 
     refreshStats(touched)
-    store.close()
 
-def put(fitTrackedData, summary=False, quiet=False):
+def put(fitTrackedData, summary=False,  verbose=False, quiet=False):
     global _fitstore
     
     if len(fitTrackedData) == 0:
         return
 
     pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
-    store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
 
     available = []   # not in external location, must be uploaded
     for filePath,(objHash, size) in fitTrackedData.iteritems():
@@ -175,14 +200,24 @@ def put(fitTrackedData, summary=False, quiet=False):
     totalSize = sum([size for f,k,o,c,size in available])
     pp.setTotalSize(totalSize)
 
-    if summary:
-        if len(available)> 0:
-            print len(fitTrackedData), 'items are being tracked'
-            print len(available), 'of the tracked items MAY need to be sent to external location'
-            print '%.2fMB maximum possible transfer size'%(totalSize/1048576)
-        else:
-            print 'No tranfers needed! There are no objects to put in external location for HEAD commit.'
+    if len(available) == 0:
+        print 'No tranfers needed! There are no objects to put in external location for HEAD.'
+    elif verbose:
+        print
+        for filePath,keyName,objPath,objInCache,size in available:
+            print '  %.2fMB  %s'%(size/1048576, filePath)
+        print '\nThe above objects may need to be tranferred. Total transfer size: %.2fMB'%(totalSize/1048576)
+    elif summary:
+        print len(fitTrackedData), 'items are being tracked'
+        print len(available), 'of the tracked items MAY need to be sent to external location'
+        print '%.2fMB maximum possible transfer size'%(totalSize/1048576)
+        print 'Run \'git fit put -v\' to list these items.'
     else:
+        try:
+            store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
+        except Exception as e:
+            print e
+            return
         errors = []
         available.sort()
         for filePath,keyName,objPath,objInCache,size in available:
@@ -190,23 +225,29 @@ def put(fitTrackedData, summary=False, quiet=False):
             if exists(objPath):
                 move = True
                 if store.check(keyName):
-                    pp.updateProgress(size, size)
-                elif not store.put(objPath, keyName, size):
-                    move = False
-                    errors.append(filePath)
+                    pp.updateProgress(size, size, custom_item_string='NO TRANSFER NEEDED')
+                else:
+                    try:
+                        transferred = store.put(objPath, keyName, size)
+                    except:
+                        transferred = False
+                    if transferred:
+                        pp.updateProgress(size, size)
+                    else:
+                        move = False
+                        errors.append(filePath)
                 if move:
                     popen(['mkdir', '-p', dirname(objInCache)]).wait()
                     popen(['mv', objPath, objInCache]).wait()
             elif not exists(objInCache):
                 errors.append(filePath)
             else:
-                pp.updateProgress(size, size)
+                pp.updateProgress(size, size, custom_item_string='NO TRANSFER NEEDED')
 
         pp.done()
+        store.close()
+
         if len(errors) > 0:
             print '\nSome items could not be transferred:'
             print '\n'.join(errors)
             print '\nAbove items could not be transferred:'
-
-    store.close()
-

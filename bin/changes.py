@@ -26,17 +26,21 @@ def printLegend():
     print '-------------------------------------------------------------------------------'
     print
 
-def printStatus(fitTrackedData, pathArgs=None, legend=True):
+def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     if legend:
         printLegend()
 
     trackedItems = getTrackedItems()
-    paths = getValidFitPaths(pathArgs, trackedItems.union(fitTrackedData))
-    modified, added, removed, untracked = getChangedItems(fitTrackedData, trackedItems, paths)
-    conflict, binary = getStagedOffenders()
-
-    if not paths:
+    if pathArgs:
+        paths = getValidFitPaths(pathArgs, trackedItems.union(fitTrackedData))
+        if not paths:
+            return
+    else:
         paths = fitTrackedData.keys()
+
+    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, trackedItems, paths)
+    conflict, binary = getStagedOffenders()
+    nochanges = unchanged if showall else []
 
     paths = {p:findObject(fitTrackedData[p][0]) for p in paths}
     toupload = {p for p,o in paths.iteritems() if o == getObjectInfo(fitTrackedData[p][0])[2]}
@@ -45,32 +49,27 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True):
     offenders = set(chain(conflict, binary))
 
     modified =  [('*  ', i) for i in set(modified)-offenders]
-    added =     [('+  ', i) for i in set(added)-offenders]
+    added =     [('+  ', i) for i in added-offenders]
     removed =   [('-  ', i) for i in removed]
-    untracked = [('~  ', i) for i in set(untracked)-offenders]
+    untracked = [('~  ', i) for i in untracked-offenders]
     conflict =  [('F  ', i) for i in conflict]
     binary =    [('B  ', i) for i in binary]
+    nochanges = [('   ', i) for i in nochanges]
 
-    if all(len(l) == 0 for l in [added,removed,untracked,modified,conflict,binary,toupload,todownload]):
+    if all(len(l) == 0 for l in [added,removed,untracked,modified,conflict,binary,toupload,todownload,nochanges]):
         print 'Nothing to show (no problems or changes detected).'
         return
 
-    print
-    for c,f in sorted(untracked+modified+added+removed+conflict+binary, key=lambda i: i[1]):
-        print '  ', c, f
-    print
+    if any(len(l) > 0 for l in [added,removed,untracked,modified,conflict,binary,nochanges]):
+        print
+        for c,f in sorted(untracked+modified+added+removed+conflict+binary+nochanges, key=lambda i: i[1]):
+            print '  ', c, f
+        print
 
     if len(toupload) > 0:
-        print 'Items TO UPLOAD:'
-        print '  %s objects in HEAD have not been synced and may need to be uploaded.'%len(toupload)
-        print '  Run git fit --put -s to see what they are, or git fit --put to start'
-        print '  uploading them if needed.'
+        print ' * %s object(s) may need to be uploaded. Run \'git fit put\' -s for details.'%len(toupload)
     if len(todownload) > 0:
-        print 'Items TO DOWNLOAD:'
-        print '  %d objects in HEAD are not in the local cache and need to be downloaded.'%len(todownload)
-        print '  Run git fit --get -s to see what they are, or git fit --get [<paths>] to start'
-        print '  downloading them if needed.'
-
+        print ' * %d object(s) need to be downloaded. Run \'git fit get\' -s for details.'%len(todownload)
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
 # Uses cached stats as the primary check to detect unchanged files, and only then
@@ -169,7 +168,9 @@ def getChangedItems(fitTrackedData, trackedItems, requestedItems=None):
     # From the existing items, we're interested in only the modified ones
     modifiedItems = getModifiedItems(existingItems, fitTrackedData)
 
-    return (modifiedItems, newItems, removedItems, untrackedItems)
+    unchangedItems = existingItems - set(modifiedItems)
+
+    return (modifiedItems, newItems, removedItems, untrackedItems, unchangedItems)
 
 def _filterBinaryFiles(files):
     binaryFiles = []
@@ -206,22 +207,23 @@ def getStagedOffenders():
     return fitConflict, binaryFiles
 
 @gitDirOperation(repoDir)
-def restore(fitTrackedData, pathArgs=None):
+def restore(fitTrackedData, quiet=False, pathArgs=None):
     trackedItems = getTrackedItems()
     paths = getValidFitPaths(pathArgs, trackedItems.union(fitTrackedData))
-    modified, added, removed, untracked = getChangedItems(fitTrackedData, trackedItems, paths)
+    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, trackedItems, paths)
 
     for i in sorted(added):
         remove(i)
-        print 'Removed: %s'%i
+        if not quiet:
+            print 'Removed: %s'%i
 
     missing = 0
     touched = {}
 
-    result = _restoreItems('Added', sorted(removed), fitTrackedData)
+    result = _restoreItems('Added', sorted(removed), fitTrackedData, quiet=quiet)
     missing += result[0]
     touched.update(result[1])
-    result = _restoreItems('Replaced', sorted(modified), fitTrackedData)
+    result = _restoreItems('Replaced', sorted(modified), fitTrackedData, quiet=quiet)
     missing += result[0]
     touched.update(result[1])
 
@@ -232,10 +234,10 @@ def restore(fitTrackedData, pathArgs=None):
     if missing > 0:
         print 'For %d of the fit objects just restored, only empty stub files were'%missing
         print 'created in their stead. This is because those objects are not cached and must be'
-        print 'downloaded. To start this download, run "git fit --get" with the same path arguments'
-        print 'passed to --restore (if any).\n'
+        print 'downloaded. To start this download, run \'git fit get\' with the same path arguments'
+        print 'passed to \'git fit restore\' restore (if any).\n'
 
-def _restoreItems(restoreType, objects, fitTrackedData):
+def _restoreItems(restoreType, objects, fitTrackedData, quiet=False):
     missing = 0
     touched = {}
     for filePath in objects:
@@ -244,11 +246,13 @@ def _restoreItems(restoreType, objects, fitTrackedData):
         fileDir = dirname(filePath)
         fileDir and (exists(fileDir) or makedirs(fileDir))
         if objPath:
-            print '%s: %s'%(restoreType, filePath)
+            if not quiet:
+                print '%s: %s'%(restoreType, filePath)
             copyfile(objPath, filePath)
             touched[filePath] = objHash
         else:
-            print '%s (empty): %s'%(restoreType, filePath)
+            if not quiet:
+                print '%s (empty): %s'%(restoreType, filePath)
             open(filePath, 'w').close()  #write a 0-byte file as placeholder
             missing += 1
 
@@ -258,9 +262,10 @@ def _restoreItems(restoreType, objects, fitTrackedData):
 def save(fitTrackedData, pathArgs=None):
     if merge.isMergeInProgress():
         if pathArgs:
-            print 'A .fit merge is currently in progress and unresolved. Path arguments to --save'
-            print 'cannot be given. If you have finished making selections in FIT_MERGE, run'
-            print 'git fit --save without any arguments to complete conflict resolution.'
+            print 'A .fit merge is currently in progress and unresolved. Path arguments to'
+            print '\'git fit save\' cannot be given. If you have finished making selections'
+            print ' in FIT_MERGE, run \'git fit save\' without any arguments to complete'
+            print 'conflict resolution.'
             return
         _saveItems(fitTrackedData, paths=merge.resolve(fitTrackedData))
     else:
@@ -284,7 +289,7 @@ def _saveItems(fitTrackedData, paths=None, pathArgs=None):
     else:
         print 'Done.'
 
-    modified, added, removed, untracked = changes
+    modified, added, removed, untracked, unchanged = changes
 
     print 'Computing hashes for new items...',
     sizes = [s.st_size for s in [stat(f) for f in added]]
