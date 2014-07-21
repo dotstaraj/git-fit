@@ -30,17 +30,9 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     if legend:
         printLegend()
 
-    trackedItems = getTrackedItems()
-    if pathArgs:
-        paths = getValidFitPaths(pathArgs, trackedItems.union(fitTrackedData))
-        if not paths:
-            return
-    else:
-        paths = fitTrackedData.keys()
-
-    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, trackedItems, paths)
+    changes = getChangedItems(fitTrackedData, pathArgs=pathArgs)
     conflict, binary = getStagedOffenders()
-    nochanges = unchanged if showall else []
+    unchanged = unchanged if showall else []
 
     paths = {p:findObject(fitTrackedData[p][0]) for p in paths}
     toupload = {p for p,o in paths.iteritems() if o == getObjectInfo(fitTrackedData[p][0])[2]}
@@ -54,15 +46,15 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     untracked = [('~  ', i) for i in untracked-offenders]
     conflict =  [('F  ', i) for i in conflict]
     binary =    [('B  ', i) for i in binary]
-    nochanges = [('   ', i) for i in nochanges]
+    unchanged = [('   ', i) for i in unchanged]
 
-    if all(len(l) == 0 for l in [added,removed,untracked,modified,conflict,binary,toupload,todownload,nochanges]):
+    if all(len(l) == 0 for l in [added,removed,untracked,modified,conflict,binary,toupload,todownload,unchanged]):
         print 'Nothing to show (no problems or changes detected).'
         return
 
-    if any(len(l) > 0 for l in [added,removed,untracked,modified,conflict,binary,nochanges]):
+    if any(len(l) > 0 for l in [added,removed,untracked,modified,conflict,binary,unchanged]):
         print
-        for c,f in sorted(untracked+modified+added+removed+conflict+binary+nochanges, key=lambda i: i[1]):
+        for c,f in sorted(untracked+modified+added+removed+conflict+binary+unchanged, key=lambda i: i[1]):
             print '  ', c, f
         print
 
@@ -133,24 +125,27 @@ def getModifiedItems(existingItems, fitTrackedData):
 
     return modifiedItems
 
-# From all existing physical files under repo directory NOT tracked by
-# git, get those that fit is being asked to track, as indicated by current
-# state of set/unset "fit" attributes.
 @gitDirOperation(repoDir)
-def getTrackedItems():
-    p = popen('git ls-files -o'.split(), stdout=PIPE)
-    p = popen('git check-attr --stdin fit'.split(), stdin=p.stdout, stdout=PIPE)
-    return {l[:-11] for l in p.stdout if l.endswith(' set\n')}
+def getChangedItems(fitTrackedData, paths=None, pathArgs=None):
 
-@gitDirOperation(repoDir)
-def getChangedItems(fitTrackedData, trackedItems, requestedItems=None):
-
-    # These are the items fit is currently tracking
+    # The tracked items according to the saved/committed .fit file
     expectedItems = set(fitTrackedData)
 
-    if requestedItems:
-        expectedItems &= requestedItems
-        trackedItems &= requestedItems
+    # The tracked items in the working directory according to the
+    # currently set fit attributes
+    p = popen('git ls-files -o'.split(), stdout=PIPE)
+    p = popen('git check-attr --stdin fit'.split(), stdin=p.stdout, stdout=PIPE)
+    trackedItems = {l[:-11] for l in p.stdout if l.endswith(' set\n')}
+
+    # Get valid, fit-friendly repo paths from given arbitrary path arguments
+    if not paths and pathArgs:
+        paths = getValidFitPaths(pathArgs, expectedItems | trackedItems)
+        if not paths:
+            return ({}, set(), set(), set(), set())
+
+    if paths:
+        expectedItems &= paths
+        trackedItems &= paths
 
     # Use set difference and intersection to determine some info about changes
     # to the status of our items
@@ -208,9 +203,7 @@ def getStagedOffenders():
 
 @gitDirOperation(repoDir)
 def restore(fitTrackedData, quiet=False, pathArgs=None):
-    trackedItems = getTrackedItems()
-    paths = getValidFitPaths(pathArgs, trackedItems.union(fitTrackedData))
-    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, trackedItems, paths)
+    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, pathArgs=pathArgs)
 
     for i in sorted(added):
         remove(i)
@@ -277,12 +270,8 @@ def save(fitTrackedData, pathArgs=None):
 
 @gitDirOperation(repoDir)
 def _saveItems(fitTrackedData, paths=None, pathArgs=None):
-    trackedItems = getTrackedItems()
-    if not paths:
-        paths = getValidFitPaths(pathArgs, trackedItems.union(fitTrackedData))
-
     print 'Checking for changes...',
-    changes = getChangedItems(fitTrackedData, trackedItems, paths)
+    changes = getChangedItems(fitTrackedData, paths=paths, pathArgs=pathArgs)
     if sum(len(l) for l in changes) == 0:
         print 'No changes detected!'
         return
