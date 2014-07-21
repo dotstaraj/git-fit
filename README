@@ -11,55 +11,50 @@ that, there are only the below few commands you need to know in order to stay fi
 these commands operate only on the HEAD revision that the repository currently points to. The
 commands, with the full set of options, are:
 
-git fit [--legend] [<paths>...]
+git-fit         [--legend] [--all] [<PATH>...]
+    -l, --legend    Print a legend showing what status symbols mean.
+    -a, --all       List even those items whose status is unchanged.
+    
+Shows the fit state of the working tree and any detected problems.
 
-Shows the fit state of the working tree and any detected problems. Use the --legend option to
-print an explanatory legend with status symbol meanings. The items shown will be any of the
-following: items ADDED to fit (+), items being tracked that are DELETED from working
-directory (-), items being tracked that are MODIFIED (*), items tracked that are now marked to
-be UNTRACKED (~), items in the HEAD commit that may need to be UPLOADED (^), and any items that
-will abort a future git-commit (!). It is possible for any item to have more than one status
-type. For instance, if you commit a new fit file and then change it again (without having yet
-run --put), that item will show ^* as its status.
+git-fit save    [<PATH>...]
 
-git fit --save [<paths>...]
-
-Updates fit with current working tree changes to fit-tracked items. This will update and
-git-add the .fit file. After running this command, any items that were shown as modified,
-added, removed, or untracked (*, +, -, ~) by the status output of git fit will no longer be
-shown as such. However, commit-aborting items (!) and items that may need to be uploaded (^)
+Updates .fit file with current changes to fit items in the working tree. The .fit file will
+also be git-added (which you can then commit along with any other non-fit changes). After
+running this command, any items that were shown as modified, added, removed, or untracked
+(*, +, -, ~) by the status output of git-fit will no longer be shown as such, since those
+changes will have been saved in the .fit file. However, any potential commit-aborting items
 will continue to be shown in the status.
 
-git fit --restore [-f] [<paths>...]
+git-fit restore [<PATH>...]
 
-Discards all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
-IRREVERSIBLY discard all uncommitted changes to your fit-tracked items, bringing your working
-tree to a pristine condition with respect to those objects currently being tracked by fit (so
-use this command with caution). In other words, whatever modified, added, or removed (*, +, -)
-items you see in the "git fit" status output before running --restore, you will no longer see
-after running --restore. Because of its destructive potential, the command must be run with
-the -f option for it to actually affect your working tree (otherwise it will just show dry-run
-summary and warning). The following changes will continue to be shown and cannot be "restored"
-with this command: items marked to be untracked from fit (~), items that may need to be
-uploaded (^), and any commit-aborting items (!).
+Discards any changes to fit items in the working tree. (THIS CANNOT BE UNDONE). Notice that
+this operation is the opposite of the save operation. This will IRREVERSIBLY discard all
+uncommitted changes to your fit-tracked items, bringing your working tree to a pristine
+condition with respect to those objects currently being tracked by fit (so use this command
+with caution). In other words, whatever modified, added, or removed (*, +, -) items you see in
+the git-fit status output before running restore, you will no longer see after running
+restore. Items marked to be untracked from fit (~) and any potential commit-aborting items will
+continue to be shown and cannot be "restored".
 
-git fit --get [-s] [-q] [<paths>...]
+git-fit get     [--summary] [--list] [--quiet] [<PATH>...]
+    -s, --summary   Do not transfer. Instead, show a summary of what would be transferred.
+    -l, --list      Do not transfer. Instead, list all the items that would be transferred.
+    -q, -quiet      Supress transfer progress output.
 
-Downloads the missing, uncached items for the HEAD commit. Until this is done, any action in
-your project that requires the actual contents of these items will not work as expected. With
-the -s option, --get will only show a summary of what needs to be transferred. Optional <paths>
-can be specified to selectively download only certain items. Use -q to to turn off progress
-output for transfers.
+Copies objects FROM remote location and/or populates working tree. Until this is done, any
+action in your project that requires the actual contents of these items will not work as
+expected. Only items that are not already in the working tree or local fit cache will be
+downloaded.
 
-git fit --put [-s] [-q]
+git-fit put     [--summary] [--list] [--quiet]
 
-Uploads fit items that have been committed to git but are not present in the external location.
-Until this is done, people who are using your commits will not have access to these items. With
-the -s option, --put will only show a summary of what may need to be transferred. Use -q to to
-turn off progress output for transfers. Keep in mind that the ^ status only means that items
-may *possibly* need to be uploaded. If those items already exist in the external store due to a
-previous upload (either by you or someone else), --put will not upload the item again. Instead,
-the item will simply be cleared of this status.
+Copies objects TO remote location from local cache. Until this is done, people who are using
+your commits will not have access to these items. If an item already exist in the external
+store due to a previous upload (either by you or someone else), the item will be skipped (but
+this cannot be determined without actually starting the upload process first). Unlike git-fit
+get, git-fit put does not take optional PATH arguments -- all items needing to be uploaded for
+the HEAD must be uploaded to fulfill the commit.
 
 
 

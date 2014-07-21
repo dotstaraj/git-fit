@@ -4,11 +4,8 @@ from os.path import isdir
 from subprocess import call as pcall
 from shutil import rmtree
 from uuid import uuid4 as uid
-
-from sys import path
 from os.path import dirname, realpath, join
-path.append(join(dirname(realpath(__file__)), '..', 'bin'))
-from fit import gitDirOperation
+from fitlib import gitDirOperation
 
 def shell(cmd):
     return pcall('set -e\n' + cmd, shell=True)
@@ -17,6 +14,7 @@ class GitFitRepo:
     def __init__(self, gitDir=None):
         self.gitDir = gitDir if gitDir != None else mkdtemp()
         self.numRevisions = 0
+        self.attributes = {}
 
         cwd = getcwd()
         chdir(self.gitDir)
@@ -25,17 +23,17 @@ class GitFitRepo:
 
     @gitDirOperation
     def fitInit(self):
-        shell('git fit')
+        shell('git-fit')
 
     @gitDirOperation
     def add(self, path=None, binary=False, stage=True):
-        if path == None:
-            path = str(uid())
+        itemId = str(uid())
+        path = path or itemId
 
         if binary:
-            content = r'\0binary file'
+            content = r'\0binary file ' + itemId
         else:
-            content = 'text file'
+            content = 'text file ' + itemId
 
         opts = {'path': path, 'content': content}
 
@@ -68,7 +66,7 @@ class GitFitRepo:
 
     @gitDirOperation
     def setFitAttr(self, path, fit=False):
-        opts = {'path': path, 'fit': '' if fit else '-', 'dirpattern': '/**' if isdir(path) else ''}
+        self.attributes[path] = {'path': path, 'fit': '' if fit else '-', 'dirpattern': '/**' if isdir(path) else ''}
         shell('printf "%(path)s%(dirpattern)s %(fit)sfit\n" >> .gitattributes'%opts)
 
     @gitDirOperation
@@ -83,6 +81,8 @@ class GitFitRepo:
 
         shell('git checkout master' + '^'*revisionFromHead)
 
+    def merge(self, revision):
+        pass
+
     def destroy(self):
         rmtree(self.gitDir)
-

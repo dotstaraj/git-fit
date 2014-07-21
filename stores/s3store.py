@@ -1,5 +1,5 @@
 from subprocess import Popen as popen, PIPE
-import objects
+from fitlib import DataStore
 from os import environ, devnull
 
 _s3keys_from_odin_cmd='''
@@ -43,7 +43,7 @@ def _getBucket():
 
     return S3Connection(*_getKeys()).get_bucket('krfdirect-git-repo')
 
-class Store(objects.Store):
+class Store(DataStore):
     def __init__(self, progress):
         self.bucket = _getBucket()
         self.progress = progress

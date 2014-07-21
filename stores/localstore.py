@@ -1,11 +1,10 @@
 from os.path import exists, join as joinpath, dirname
 from shutil import copy, rmtree
 from tempfile import mkdtemp
-import objects
 from subprocess import Popen as popen
-from fit import fitDir
+from fitlib import fitDir, DataStore
 
-class Store(objects.Store):
+class Store(DataStore):
 
     def __init__(self, *args, **kwds):
         self.dir = joinpath(fitDir, 'store')
