@@ -1,6 +1,6 @@
 from fit import fitStats, gitDirOperation, repoDir
 from fit import readStatFile, writeStatFile, refreshStats
-from objects import findObject, getObjectInfo
+from objects import findObject, getObjectInfo, getUpstreamObjects, getDownstreamObjects
 from paths import getValidFitPaths
 import merge
 from subprocess import Popen as popen, PIPE
@@ -8,6 +8,7 @@ from os.path import exists, dirname, getsize
 from os import remove, makedirs
 from shutil import copyfile
 from itertools import chain
+import re
 
 '''
 parser.add_argument('-a', '--all', action='store_true', help='List all unchanged items in addition to the changed ones')
@@ -30,13 +31,16 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     if legend:
         printLegend()
 
-    changes = getChangedItems(fitTrackedData, pathArgs=pathArgs)
+    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, pathArgs=pathArgs)
     conflict, binary = getStagedOffenders()
     unchanged = unchanged if showall else []
 
-    paths = {p:findObject(fitTrackedData[p][0]) for p in paths}
-    toupload = {p for p,o in paths.iteritems() if o == getObjectInfo(fitTrackedData[p][0])[2]}
-    todownload = {p for p,o in paths.iteritems() if exists(p) and getsize(p) == 0 and not o}
+    toupload = set()
+    todownload = set()
+
+    paths = (not pathArgs and fitTrackedData) or getValidFitPaths(pathArgs, set(fitTrackedData))
+    toupload = getUpstreamObjects(fitTrackedData, paths)
+    todownload = getDownstreamObjects(fitTrackedData, paths)
 
     offenders = set(chain(conflict, binary))
 
@@ -133,9 +137,10 @@ def getChangedItems(fitTrackedData, paths=None, pathArgs=None):
 
     # The tracked items in the working directory according to the
     # currently set fit attributes
+    fitSetRgx = re.compile('(.*): fit: set')
     p = popen('git ls-files -o'.split(), stdout=PIPE)
     p = popen('git check-attr --stdin fit'.split(), stdin=p.stdout, stdout=PIPE)
-    trackedItems = {l[:-11] for l in p.stdout if l.endswith(' set\n')}
+    trackedItems = {m.group(1) for m in [fitSetRgx.match(l) for l in p.stdout] if m}
 
     # Get valid, fit-friendly repo paths from given arbitrary path arguments
     if not paths and pathArgs:
@@ -202,8 +207,23 @@ def getStagedOffenders():
     return fitConflict, binaryFiles
 
 @gitDirOperation(repoDir)
+def checkForChanges(fitTrackedData, paths=None, pathArgs=None):
+    print 'Checking for changes...',
+    changes = getChangedItems(fitTrackedData, paths=paths, pathArgs=pathArgs)
+    if not any(changes):
+        print 'No changes detected!'
+        return
+    
+    print 'Done.'
+    return changes
+
+@gitDirOperation(repoDir)
 def restore(fitTrackedData, quiet=False, pathArgs=None):
-    modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, pathArgs=pathArgs)
+    changes = checkForChanges(fitTrackedData, pathArgs=pathArgs)
+    if not changes:
+        return
+
+    modified, added, removed, untracked, unchanged = changes
 
     for i in sorted(added):
         remove(i)
@@ -270,13 +290,9 @@ def save(fitTrackedData, pathArgs=None):
 
 @gitDirOperation(repoDir)
 def _saveItems(fitTrackedData, paths=None, pathArgs=None):
-    print 'Checking for changes...',
-    changes = getChangedItems(fitTrackedData, paths=paths, pathArgs=pathArgs)
-    if sum(len(l) for l in changes) == 0:
-        print 'No changes detected!'
+    changes = checkForChanges(fitTrackedData, paths=paths, pathArgs=pathArgs)
+    if not changes:
         return
-    else:
-        print 'Done.'
 
     modified, added, removed, untracked, unchanged = changes
 

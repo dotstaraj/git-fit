@@ -7,7 +7,8 @@ import sys
 from subprocess import call
 sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
-from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, readFitFile, firstTimeFile
+from fit import fitDir, cacheDir, syncDir, repoDir, gitDir
+from fit import readFitFile, firstTimeFile, printAsText
 import hooks, objects, merge, changes
 import stat
 
@@ -88,7 +89,7 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
     f.close()
 
     f = open(joinpath(gitDir, 'info', 'attributes'), 'w')
-    f.write('\n.fit -fit merge=fitfile\n')
+    f.write('\n.fit -fit merge=fitfile diff=fitfile\n')
     f.close()
 
     f = open(joinpath(gitDir, 'info', 'exclude'), 'w')
@@ -116,6 +117,9 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
     cmd = '''
         git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
         git config merge.fitfile.driver 'git fit --merge-driver %O %A %B'
+        git config diff.fitfile.binary true
+        git config diff.fitfile.textconv 'git fit --text-output'
+        git config diff.fitfile.cachetextconv true
     '''
     call('set -e\n' + cmd, shell=True)
 
@@ -148,6 +152,7 @@ if __name__ == '__main__':
     group.add_argument('--post-commit', action='store_true')
     group.add_argument('--post-checkout', action='store_true')
     group.add_argument('--merge-driver', action='store_true')
+    group.add_argument('--text-output', action='store_true')
 
     parser.add_argument('remaining', nargs='*')
 
@@ -173,6 +178,8 @@ if __name__ == '__main__':
         hooks.postCheckout(fitTrackedData, *(opts.remaining[:3]))
     elif opts.merge_driver:
         merge.mergeDriver(*(opts.remaining[:3]))
+    elif opts.text_output:
+        printAsText(opts.remaining[0])
     elif opts.get:
         objects.loadstore()
         objects.get(fitTrackedData, pathArgs=opts.remaining, summary=opts.summary, verbose=opts.verbose, quiet=opts.quiet)

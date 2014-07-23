@@ -73,6 +73,9 @@ def writeFitFile(fitData, filePath=fitFile):
     dump(fitData, fitFileOut)
     fitFileOut.close()
 
+def printAsText(filePath=None):
+    '\n'.join(sorted(['%s %s'%(b[:7],a) for a,(b,c) in  readFitFile(filePath).iteritems()], key=lambda i:i[0]))
+
 def readStatFile():
     return load(open(statFile)) if path.exists(statFile) else {}
 

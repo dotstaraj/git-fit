@@ -43,6 +43,24 @@ def findObject(objName):
         return None
 
 @gitDirOperation(repoDir)
+def getUpstreamObjects(fitTrackedData, paths):
+    objects = []
+    hashToPathFitData = {fitTrackedData[p][0]:p for p in paths}
+
+    for root, dirs, files in walk(syncDir):
+        for f in files:
+            objPath = joinpath(root,f)
+            o = basename(dirname(objPath))+basename(objPath)
+            if o in hashToPathFitData:
+                objects.append(hashToPathFitData[o])
+    
+    return objects
+
+@gitDirOperation(repoDir)
+def getDownstreamObjects(fitTrackedData, paths):
+    return [p for p in paths if exists(p) and getsize(p) == 0 and findObject(fitTrackedData[p][0])]
+
+@gitDirOperation(repoDir)
 def placeObject(objName, source):
     obj, objInCache, objToSync = getObjectInfo(objName)
 
