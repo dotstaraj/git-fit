@@ -1,18 +1,16 @@
-from fit import fitStats, gitDirOperation, repoDir
-from fit import readStatFile, writeStatFile, refreshStats
-from objects import findObject, getObjectInfo, getUpstreamObjects, getDownstreamObjects
+from fit import fitStats, fitFile, gitDirOperation, repoDir
+from fit import readStatFile, writeStatFile, refreshStats, writeFitFile
+from objects import findObject, placeObject, getObjectInfo, getUpstreamItems, getDownstreamItems
 from paths import getValidFitPaths
 import merge
 from subprocess import Popen as popen, PIPE
 from os.path import exists, dirname, getsize
-from os import remove, makedirs
+from os import remove, makedirs, stat
 from shutil import copyfile
 from itertools import chain
 import re
-
-'''
-parser.add_argument('-a', '--all', action='store_true', help='List all unchanged items in addition to the changed ones')
-'''
+from threading import Thread as thread
+from sys import stdout
 
 def printLegend():
     print 'Meaning of status symbols:'
@@ -31,6 +29,10 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     if legend:
         printLegend()
 
+    if merge.isMergeInProgress():
+        print merge.conflictMsg
+        return
+
     modified, added, removed, untracked, unchanged = getChangedItems(fitTrackedData, pathArgs=pathArgs)
     conflict, binary = getStagedOffenders()
     unchanged = unchanged if showall else []
@@ -38,9 +40,9 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     toupload = set()
     todownload = set()
 
-    paths = (not pathArgs and fitTrackedData) or getValidFitPaths(pathArgs, set(fitTrackedData))
-    toupload = getUpstreamObjects(fitTrackedData, paths)
-    todownload = getDownstreamObjects(fitTrackedData, paths)
+    paths = fitTrackedData if not pathArgs else getValidFitPaths(pathArgs, set(fitTrackedData), repoDir)
+    toupload = getUpstreamItems(fitTrackedData, paths)
+    todownload = getDownstreamItems(fitTrackedData, paths)
 
     offenders = set(chain(conflict, binary))
 
@@ -63,9 +65,31 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
         print
 
     if len(toupload) > 0:
-        print ' * %s object(s) may need to be uploaded. Run \'git fit put\' -s for details.'%len(toupload)
+        print ' * %s object(s) may need to be uploaded. Run \'git-fit put\' -s for details.'%len(toupload)
     if len(todownload) > 0:
-        print ' * %d object(s) need to be downloaded. Run \'git fit get\' -s for details.'%len(todownload)
+        print ' * %d object(s) need to be downloaded. Run \'git-fit get\' -s for details.'%len(todownload)
+
+def _gitHashInputProducer(stream, items):
+    numItems = len(items)
+    numDigits = str(len(str(numItems)+''))
+    for i,j in enumerate(items):
+        print ('\rComputing hashes for new objects...%6.2f%%  '+'%'+numDigits+'s/%'+numDigits+'s')%(i*100./numItems, i, numItems),
+        print >>stream, j
+        stdout.flush()
+        stream.flush()
+    print '\rComputing hashes for new objects...Done.'+' '*(9+int(numDigits)*2)
+    stream.close()
+
+def computeHashes(items):
+    if not items:
+        return []
+
+    hashes = []
+    p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
+    thread(target=_gitHashInputProducer, args=(p.stdin,items)).start()
+    for l in p.stdout:
+        hashes.append(l.strip())
+    return hashes
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
 # Uses cached stats as the primary check to detect unchanged files, and only then
@@ -87,11 +111,7 @@ def getModifiedItems(existingItems, fitTrackedData):
     # be considered "modified". Modified items are those that are touched
     # AND whose checksums are different, so we do checksum comparisons next
     touchedItems = [f for f in statsNew if statsNew[f][0] > 0 and (f not in statsOld or tuple(statsOld[f][1]) != statsNew[f])]
-
-    # Basically the next two lines make "touchedItems" a dictionary mapping filenames to their hash sums.
-    # Hashes are re-computed ONLY for touched items.
-    p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
-    touchedItems = dict(zip(touchedItems, p.communicate('\n'.join(touchedItems))[0].strip().split('\n')))
+    touchedHashes = dict(zip(touchedItems, computeHashes(touchedItems)))
 
     # Check all existing items for modification by comparing their expected
     # hash sums (those stored in the .fit file) to their new, actual hash sums.
@@ -103,17 +123,17 @@ def getModifiedItems(existingItems, fitTrackedData):
                              # for everything, not just touched items
         trackedHash = fitTrackedData[i][0]
         size = statsNew[i][0]
-        if i in touchedItems and touchedItems[i] != trackedHash:
-            modifiedItems[i] = (touchedItems[i], size)
+        if i in touchedHashes and touchedHashes[i] != trackedHash:
+            modifiedItems[i] = (touchedHashes[i], size)
         elif size > 0 and i in statsOld and statsOld[i][0] != trackedHash:
             modifiedItems[i] = (statsOld[i][0], size)
 
     # Update our cached stats if necessary
     writeStatCache = False
-    if len(touchedItems) > 0:
+    if len(touchedHashes) > 0:
         writeStatCache = True
-        for f in touchedItems:
-            statsOld[f] = (touchedItems[f], statsNew[f])
+        for f in touchedHashes:
+            statsOld[f] = (touchedHashes[f], statsNew[f])
 
     # By this point we should have new stats for all existing items, stored in
     # "statsOld". If we don't, it means some items have been deleted and can
@@ -144,7 +164,7 @@ def getChangedItems(fitTrackedData, paths=None, pathArgs=None):
 
     # Get valid, fit-friendly repo paths from given arbitrary path arguments
     if not paths and pathArgs:
-        paths = getValidFitPaths(pathArgs, expectedItems | trackedItems)
+        paths = getValidFitPaths(pathArgs, expectedItems | trackedItems, repoDir)
         if not paths:
             return ({}, set(), set(), set(), set())
 
@@ -208,13 +228,11 @@ def getStagedOffenders():
 
 @gitDirOperation(repoDir)
 def checkForChanges(fitTrackedData, paths=None, pathArgs=None):
-    print 'Checking for changes...',
     changes = getChangedItems(fitTrackedData, paths=paths, pathArgs=pathArgs)
     if not any(changes):
         print 'No changes detected!'
         return
     
-    print 'Done.'
     return changes
 
 @gitDirOperation(repoDir)
@@ -247,8 +265,8 @@ def restore(fitTrackedData, quiet=False, pathArgs=None):
     if missing > 0:
         print 'For %d of the fit objects just restored, only empty stub files were'%missing
         print 'created in their stead. This is because those objects are not cached and must be'
-        print 'downloaded. To start this download, run \'git fit get\' with the same path arguments'
-        print 'passed to \'git fit restore\' restore (if any).\n'
+        print 'downloaded. To start this download, run \'git-fit get\' with the same path arguments'
+        print 'passed to \'git-fit restore\' restore (if any).\n'
 
 def _restoreItems(restoreType, objects, fitTrackedData, quiet=False):
     missing = 0
@@ -276,13 +294,18 @@ def save(fitTrackedData, pathArgs=None):
     if merge.isMergeInProgress():
         if pathArgs:
             print 'A .fit merge is currently in progress and unresolved. Path arguments to'
-            print '\'git fit save\' cannot be given. If you have finished making selections'
-            print ' in FIT_MERGE, run \'git fit save\' without any arguments to complete'
+            print '\'git-fit save\' cannot be given. If you have finished making selections'
+            print ' in FIT_MERGE, run \'git-fit save\' without any arguments to complete'
             print 'conflict resolution.'
             return
-        _saveItems(fitTrackedData, paths=merge.resolve(fitTrackedData))
+
+        result = merge.resolve(fitTrackedData)
+        if not result:
+            return
+        updateFitFile, paths = result
+        _saveItems(fitTrackedData, paths=paths)
     else:
-        if not _saveItems(fitTrackedData, pathArgs=pathArgs):
+        if not (_saveItems(fitTrackedData, pathArgs=pathArgs) or updateFitFile):
             return
 
     writeFitFile(fitTrackedData)
@@ -296,12 +319,10 @@ def _saveItems(fitTrackedData, paths=None, pathArgs=None):
 
     modified, added, removed, untracked, unchanged = changes
 
-    print 'Computing hashes for new items...',
     sizes = [s.st_size for s in [stat(f) for f in added]]
-    p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
-    added = zip(added, zip(p.communicate('\n'.join(added))[0].strip().split('\n'), sizes))
+    newHashes = computeHashes(list(added))
+    added = zip(added, zip(newHashes, sizes))
     modified.update(added)
-    print 'Done.'
 
     fitTrackedData.update(modified)
     for i in removed:

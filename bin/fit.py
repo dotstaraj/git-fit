@@ -1,7 +1,7 @@
 from subprocess import Popen as popen, PIPE
 from os import stat, path, chdir, getcwd
-from gzip import open as gz
 from json import load, dump
+from paths import fitMapToTree, fitTreeToMap
 
 # Get the repo root directory if inside one, otherwise exit
 _p = popen('git rev-parse --show-toplevel'.split(), stdout=PIPE)
@@ -16,9 +16,10 @@ fitFile = path.join(repoDir, '.fit')
 cacheDir = path.join(fitDir, 'objects')
 syncDir = path.join(cacheDir, 'tosync')
 statFile = path.join(fitDir, 'stat')
-conflictFile = path.join(repoDir, 'FIT_MERGE')
-theirFitFile = path.join(fitDir, 'merge-their')
+mergeConflictFile = path.join(repoDir, 'FIT_MERGE')
+mergeOtherFitFile = path.join(fitDir, 'merge-other')
 firstTimeFile = path.join(fitDir, 'first-time')
+cacheLruFile = path.join(fitDir, 'cache-lru')
 savedFile = path.join(fitDir, 'save')
 tempDir = path.join(fitDir, 'temp')
 
@@ -62,19 +63,18 @@ def fitStats(filename):
     stats = stat(filename)
     return stats.st_size, stats.st_mtime, stats.st_ctime, stats.st_ino
 
-# The fit file is gzipped Python-pickled dictionary of this form:
-#   {filename --> hash,size}
-#
 def readFitFile(filePath=fitFile):
-    return load(gz(filePath)) if path.exists(filePath) and path.getsize(filePath) > 0 else {}
+    from gzip import open
+    return load(open(filePath)) if path.exists(filePath) and path.getsize(filePath) > 0 else {}
 
 def writeFitFile(fitData, filePath=fitFile):
-    fitFileOut = gz(filePath, 'wb')
-    dump(fitData, fitFileOut)
+    fitFileOut = open(filePath, 'wb')
+    dump(fitMapToTree(fitData), fitFileOut,indent=0,sort_keys=True)
     fitFileOut.close()
 
-def printAsText(filePath=None):
-    '\n'.join(sorted(['%s %s'%(b[:7],a) for a,(b,c) in  readFitFile(filePath).iteritems()], key=lambda i:i[0]))
+def printAsText(fitData):
+    items = sorted([(b[:7],a) for a,(b,c) in  fitData.iteritems()], key=lambda i:i[1])
+    print '\n'.join(['%s %s'%(h,p) for h,p in items])
 
 def readStatFile():
     return load(open(statFile)) if path.exists(statFile) else {}
@@ -89,3 +89,9 @@ def refreshStats(items):
     for i in items:
         stats[i] = (items[i], fitStats(i))
     writeStatFile(stats)
+
+def getFitSize(fitTrackedData):
+    return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
+
+def getHeadRevision():
+    return popen('git rev-parse HEAD'.split(), stdout=PIPE).communicate()[0].strip()

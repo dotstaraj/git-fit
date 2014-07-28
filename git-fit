@@ -1,76 +1,60 @@
 #!/usr/bin/env python2.7
 
-import argparse
+from argparse import ArgumentParser
 from os import getcwd, chdir, mkdir, chmod
 from os.path import dirname, realpath, relpath, join as joinpath, exists
 import sys
 from subprocess import call
 sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
+from sys import argv
 from fit import fitDir, cacheDir, syncDir, repoDir, gitDir
 from fit import readFitFile, firstTimeFile, printAsText
 import hooks, objects, merge, changes
 import stat
 
+def main():
+    opts = getOpts()
 
-helpMsg='''
-git fit [--legend] [<paths>...]
+    fitTrackedData = readFitFile()
 
-Shows the fit state of the working tree and any detected problems. Use the --legend option to
-print an explanatory legend with status symbol meanings. It is possible for any item to have
-more than one status. For instance, if you commit a new fit file and then change it again
-(without having yet run 'git fit put'), that item will show ^* as its status.
+    if len(argv) > 1:
+        if argv[1] in ('save', 'restore'):
+            getattr(changes, argv[1])(fitTrackedData, pathArgs=opts.paths)
+        elif argv[1] in ('get', 'put'):
+            objects.loadstore()
+            kwd_args = {'summary':opts.summary, 'verbose':opts.verbose, 'quiet':opts.quiet}
+            if argv[1] == 'get':
+                kwd_args['pathArgs'] = opts.paths
+            getattr(objects, argv[1])(fitTrackedData, **kwds)
+    else:
+        firstTimeRepoSetup(fitTrackedData, opts.no_hooks)
+        if not opts.git:
+            changes.printStatus(fitTrackedData, pathArgs=opts.paths, legend=opts.legend, showall=opts.all)
+            exit()
 
-git fit save [<paths>...]
-
-Updates fit with current working tree changes to fit-tracked items. This will update and
-git-add the .fit file. After running this command, any items that were shown as modified,
-added, removed, or untracked (*, +, -, ~) by the status output of git fit will no longer be
-shown as such. However, commit-aborting items (!) and items that may need to be uploaded (^)
-will continue to be shown in the status.
-
-git fit restore [-f] [<paths>...]
-
-Discards all fit-related changes in the working tree (THIS CANNOT BE UNDONE). This will
-IRREVERSIBLY discard all uncommitted changes to your fit-tracked items, bringing your working
-tree to a pristine condition with respect to those objects currently being tracked by fit (so
-use this command with caution). In other words, whatever modified, added, or removed (*, +, -)
-items you see in the "git fit" status output before running restore, you will no longer see
-after running restore. Because of its destructive potential, the command must be run with the
--f option for it to actually affect your working tree (otherwise it will just show dry-run
-summary and warning). The following changes will continue to be shown and cannot be "restored"
-with this command: items marked to be untracked from fit (~), items that may need to be
-uploaded (^), and any commit-aborting items (!).
-
-git fit get [-s] [-q] [<paths>...]
-
-Downloads the missing, uncached items for the HEAD commit. Until this is done, any action in
-your project that requires the actual contents of these items will not work as expected. With
-the -s option, only a summary of what needs to be transferred will be shown. Optional <paths>
-can be specified to selectively download only certain items. Use -q to to turn off progress
-output for transfers.
-
-git fit put [-s] [-q]
-
-Uploads fit items that have been committed to git but are not present in the external location.
-Until this is done, people who are using your commits will not have access to these items. With
-the -s option, only a summary of what may need to be transferred will be shown. Use -q to to
-turn off progress output for transfers. If an item already exist in the external store due to a
-previous upload (either by you or someone else), the item will be skipped (but this cannot be 
-determined without actually starting the upload process first).
-'''
+        if opts.git == 'pre-commit':
+            hooks.preCommit(fitTrackedData)
+        elif opts.git == 'post-commit':
+            hooks.postCommit(fitTrackedData)
+        elif opts.git == 'post-merge' or opts.git == 'post-checkout' and opts.paths[0] != opts.paths[1] and opts.paths[2] == '1':
+            hooks.postCheckout(fitTrackedData)
+        elif opts.git == 'merge_driver':
+            merge.mergeDriver(*(opts.paths[:3]))
+        elif opts.git == 'text_output':
+            printAsText(readFitFile(opts.paths[0]))
 
 # This will be used to check whether we need to run (or re-run after changes to git-fit)
 # this first-time repo setup
 _firstTimeCounter = 0
 
 def firstTimeRepoSetup(fitTrackedData, nohooks=False):
+    global _firstTimeCounter
     if not exists(fitDir):
         print 'Preparing this repository for use with git-fit...'
         mkdir(fitDir)
         mkdir(cacheDir)
         mkdir(syncDir)
-        print 'Populating working tree with fit items...'
         changes.restore(fitTrackedData, quiet=True)
     elif exists(firstTimeFile):
         firstTimeCount = int(open(firstTimeFile).read())
@@ -100,96 +84,158 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
         return
 
     f = open(joinpath(gitDir, 'hooks', 'pre-commit'), 'w')
-    f.write('\ngit fit --pre-commit\n')
+    f.write('\n$fitt --git=pre-commit\n')
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'pre-commit'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     
     f = open(joinpath(gitDir, 'hooks', 'post-commit'), 'w')
-    f.write('\ngit fit --post-commit\n')
+    f.write('\n$fitt --git=post-commit\n')
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'post-commit'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
     f = open(joinpath(gitDir, 'hooks', 'post-checkout'), 'w')
-    f.write('\ngit fit --post-checkout $1 $2 $3\n')
+    f.write('\n$fitt --git=post-checkout ${1} ${2} ${3}\n')
     f.close()
     chmod(joinpath(gitDir, 'hooks', 'post-checkout'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
 
+    f = open(joinpath(gitDir, 'hooks', 'post-merge'), 'w')
+    f.write('\n$fitt --git=post-merge\n')
+    f.close()
+    chmod(joinpath(gitDir, 'hooks', 'post-merge'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+
     cmd = '''
         git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
-        git config merge.fitfile.driver 'git fit --merge-driver %O %A %B'
+        git config merge.fitfile.driver '$fitt --git=merge-driver %O %A %B'
         git config diff.fitfile.binary true
-        git config diff.fitfile.textconv 'git fit --text-output'
+        git config diff.fitfile.textconv '$fitt --git=text-output'
         git config diff.fitfile.cachetextconv true
     '''
     call('set -e\n' + cmd, shell=True)
 
+def getOpts():
+    if len(argv) == 1 or argv[1] not in ('save', 'restore', 'get', 'put'):
+        if '-h' in argv:
+            print helpUsage
+            exit()
+
+        if '--help' in argv:
+            print helpIntro + helpUsage + helpFull
+            exit()
+        parser = ArgumentParser(add_help=False, usage='git-fit [--help] [--legend] [--all] [<PATH>...]')
+        parser.add_argument('--no-hooks', action='store_true')
+        parser.add_argument('--git', choices=('post-commit','pre-commit','post-checkout','post-merge','merge-driver','text-output'))
+        parser.add_argument('--all', '-a', action='store_true')
+        parser.add_argument('--legend', '-l', action='store_true')
+        parser.add_argument('paths', nargs='*')
+        opts = parser.parse_args()
+    elif argv[1] in ('save', 'restore'):
+        usage = 'git-fit %s [--help] [<PATH>...]'%(argv[1])
+        if '--help' in argv[2:]:
+            print 'usage:', usage
+            print (cmdSaveHelp if argv[1] == 'save' else cmdRestoreHelp)
+            exit()
+        if '-h' in argv[2:]:
+            print 'usage:', usage
+            exit()
+        parser = ArgumentParser(add_help=False, usage=usage)
+        parser.add_argument('paths', nargs='*')
+        opts = parser.parse_args(argv[2:])
+    elif argv[1] in ('get', 'put'):
+        usage = 'git-fit %s [--help] %s'%(argv[1], cmdGetUsage if argv[1] == 'get' else cmdPutUsage)
+        if '--help' in argv[2:]:
+            print 'usage:', usage
+            print (cmdGetHelp if argv[1] == 'get' else cmdPutHelp)
+            print 'Options:',cmdGetPutOpts
+            exit()
+        if '-h' in argv[2:]:
+            print 'usage:', usage
+            exit()
+        parser = ArgumentParser(add_help=False, usage=usage)
+        parser.add_argument('--summary', '-s', action='store_true')
+        parser.add_argument('--list', '-l', action='store_true')
+        parser.add_argument('--quiet', '-q', action='store_true')
+        parser.add_argument('paths', nargs='*')
+        opts = parser.parse_args(argv[2:])
+
+    return opts
+
+helpIntro='''
+git-fit has five basic operations, status, save/restore, and get/put. All
+operations except 'put' can optionally take one or more paths to select a
+subset of items. Use -h/--help to get brief/detailed help on any operation.
+Without any subcommand, git-fit shows the status of fit items.
+'''
+
+helpUsage='''
+Usage:
+    git-fit [<COMMAND>] [-h] [--help]
+
+    git-fit         [--legend] [--all] [<PATH>...]
+    git-fit save    [<PATH>...]
+    git-fit restore [<PATH>...]
+    git-fit get     [--summary] [--list] [--quiet] [<PATH>...]
+    git-fit put     [--summary] [--list] [--quiet]
+'''
+
+cmdGetPutOpts='''
+    -s, --summary   Do not transfer. Instead, show a summary of what would be transferred.
+    -l, --list      Do not transfer. Instead, list all the items that would be transferred.
+    -q, -quiet      Supress transfer progress output.
+'''
+
+helpFull='''
+Commands:
+    (none)    Shows status of fit items in the working tree.
+
+    save      Updates .fit file with current changes to fit items in the working tree.
+    restore   Discards any changes to fit items in the working tree. (opposite of save).
+    get       Copies objects FROM remote location and/or populates working tree.
+    put       Copies objects TO remote location from local cache.
+
+Options:
+    -h              Show brief help for the command.
+    --help          Show full help for the command.
+
+    status
+    -l, --legend    Print a legend showing what status symbols mean.
+    -a, --all       List even those items whose status is unchanged.
+
+    get/put''' + cmdGetPutOpts
+
+cmdGetUsage = '[--summary] [--list] [--quiet] [<PATH>...]'
+cmdPutUsage = '[--summary] [--list] [--quiet]'
+cmdSaveHelp = '''
+Updates .fit file with current changes to fit items in the working tree. The .fit file will
+also be git-added (which you can then commit along with any other non-fit changes). After
+running this command, any items that were shown as modified, added, removed, or untracked
+(*, +, -, ~) by the status output of git-fit will no longer be shown as such, since those
+changes will have been saved in the .fit file. However, any potential commit-aborting items
+will continue to be shown in the status.
+'''
+cmdRestoreHelp = '''
+Discards any changes to fit items in the working tree. (THIS CANNOT BE UNDONE). Notice that
+this operation is the opposite of the save operation. This will IRREVERSIBLY discard all
+uncommitted changes to your fit-tracked items, bringing your working tree to a pristine
+condition with respect to those objects currently being tracked by fit (so use this command
+with caution). In other words, whatever modified, added, or removed (*, +, -) items you see in
+the git-fit status output before running restore, you will no longer see after running
+restore. Items marked to be untracked from fit (~) and any potential commit-aborting items will
+continue to be shown and cannot be "restored".
+'''
+cmdGetHelp = '''
+Copies objects FROM remote location and/or populates working tree. Until this is done, any
+action in your project that requires the actual contents of these items will not work as
+expected. Only items that are not already in the working tree or local fit cache will be
+downloaded.
+'''
+cmdPutHelp = '''
+Copies objects TO remote location from local cache. Until this is done, people who are using
+your commits will not have access to these items. If an item already exist in the external
+store due to a previous upload (either by you or someone else), the item will be skipped (but
+this cannot be determined without actually starting the upload process first). Unlike git-fit
+get, git-fit put does not take optional PATH arguments -- all items needing to be uploaded for
+the HEAD must be uploaded to fullfill the commit.
+'''
+
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        if sys.argv[1] in ('-h', '--help'):
-            print helpMsg
-            exit(1)
-    
-    parser = argparse.ArgumentParser(prog='fit')
-    parser.add_argument('--no-hooks', action='store_true')
-
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--legend', action='store_true')
-    parser.add_argument('--all', action='store_true')
-    group.add_argument('--save', action='store_true')
-    group.add_argument('--restore', action='store_true')
-    parser.add_argument('-f', '--force', action='store_true')
-
-    group.add_argument('--get', action='store_true')
-    group.add_argument('--put', action='store_true')
-    parser.add_argument('-s', '--summary', action='store_true')
-    parser.add_argument('-v', '--verbose', action='store_true')
-    parser.add_argument('-q', '--quiet', action='store_true')
-
-    # Undocumented --run-hook arguments. This allows git-hooking by simply
-    # insering one-line commands like "git fit --run-hook-preCommit" into
-    # the into the git hook scripts
-    group.add_argument('--pre-commit', action='store_true')
-    group.add_argument('--post-commit', action='store_true')
-    group.add_argument('--post-checkout', action='store_true')
-    group.add_argument('--merge-driver', action='store_true')
-    group.add_argument('--text-output', action='store_true')
-
-    parser.add_argument('remaining', nargs='*')
-
-    opts = parser.parse_args()
-
-    if opts.force and not opts.restore:
-        print 'error: the -f/--force option can only be used with --restore'
-        exit(1)
-    if not opts.force and opts.restore:
-        print 'The --restore option must be run together with -f/--force. To verify what objects'
-        print 'would be affected by --restore -f, run git fit to output current status of objects.'
-        exit()
-
-    fitTrackedData = readFitFile()
-
-    firstTimeRepoSetup(fitTrackedData, opts.no_hooks)
-
-    if opts.pre_commit:
-        hooks.preCommit(fitTrackedData)
-    elif opts.post_commit:
-        hooks.postCommit(fitTrackedData)
-    elif opts.post_checkout:
-        hooks.postCheckout(fitTrackedData, *(opts.remaining[:3]))
-    elif opts.merge_driver:
-        merge.mergeDriver(*(opts.remaining[:3]))
-    elif opts.text_output:
-        printAsText(opts.remaining[0])
-    elif opts.get:
-        objects.loadstore()
-        objects.get(fitTrackedData, pathArgs=opts.remaining, summary=opts.summary, verbose=opts.verbose, quiet=opts.quiet)
-    elif opts.put:
-        objects.loadstore()
-        objects.put(fitTrackedData, summary=opts.summary, verbose=opts.verbose, quiet=opts.quiet)
-    elif opts.restore:
-        changes.restore(fitTrackedData, pathArgs=opts.remaining)
-    elif opts.save:
-        changes.save(fitTrackedData, pathArgs=opts.remaining)
-    else:
-        changes.printStatus(fitTrackedData, pathArgs=opts.remaining, legend=opts.legend, showall=opts.all)
- 
+    main()

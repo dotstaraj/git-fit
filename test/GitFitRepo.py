@@ -25,7 +25,7 @@ class GitFitRepo:
 
     @gitDirOperation
     def fitInit(self):
-        shell('git fit')
+        shell('git-fit')
 
     @gitDirOperation
     def add(self, path=None, binary=False, stage=True):

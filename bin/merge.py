@@ -1,5 +1,5 @@
 from fit import gitDirOperation, repoDir, readFitFile, writeFitFile
-from fit import theirFitFile, conflictFile
+from fit import mergeOtherFitFile, mergeConflictFile
 from os import path, remove
 from shutil import move
 from subprocess import Popen as popen, PIPE
@@ -21,7 +21,7 @@ this "FIT_MERGE" file.
 conflictIntructions = '''\
 # Each row below indicates an item conflict and consists of the following three columns:
 #
-#      <SELECTION_ENTRY_BOX>  <"MINE"-CHANGE><"THEIR"-CHANGE>  <ITEM>
+#      <SELECTION_ENTRY_BOX>  <"MINE"-CHANGE><"OTHER"-CHANGE>  <ITEM>
 #
 # Example:
 # (symbol meanings: "*" = modified, "+" = added, "-" = removed)
@@ -33,25 +33,24 @@ conflictIntructions = '''\
 # by entering only a SINGLE letter inside []:
 # 
 #  - Enter [M] to select MINE change. This is equivalent to deleting the entire row.
-#  - Enter [T] to select THEIR change.
+#  - Enter [O] to select OTHER change.
 #  - Enter [W] to select WORKING tree version of the item.
 #      If the item does not exist in the working tree, the resolution amounts to REMOVING the item
-#      from fit. When choosing [W], "git fit" may be run to verify an item's status if needed.
+#      from fit. When choosing [W], git-fit may be run to verify an item's status if needed.
 #
-
 # REMEMBER:
-# If these conflicts resulted from a git REBASE operation, then "mine" and "their" refer to the
+# If these conflicts resulted from a git REBASE operation, then "mine" and "other" refer to the
 # OPPOSITE versions than what may intuitively make sense from your point of view. In other words,
 # for rebase, "mine" refers to the version that you'd be bringing INTO your current branch. And, 
-# likewise, "their" actually refers to YOUR version that's already in the current branch itself.
+# likewise, "other" actually refers to YOUR version that's already in the current branch itself.
 
-# ==> 1. Make your selections (M or T or W) below.
-# ==> 2. Run "git fit save".
+# ==> 1. Make your selections (M or O or W) below.
+# ==> 2. Run "git-fit save".
 # ==> 3. Proceed with the merge process in git as normal.
 
 '''.split('\n')
 
-_conflictLine_re = re.compile('\s*\[([MTW]?)\]\s+(\*\*|\+\+|\*-|-\*)\s+(.+)\s*$')
+_conflictLine_re = re.compile('\s*\[([MOW]?)\]\s+(\*\*|\+\+|\*-|-\*)\s+(.+)\s*$')
 
 def mergeDriver(common, mine, other):
     merged, conflicts = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
@@ -61,8 +60,8 @@ def mergeDriver(common, mine, other):
         exit(0)
 
     writeFitFile(merged)
-    writeConflictFile(conflicts)
-    move(other, theirFitFile)
+    writemergeConflictFile(conflicts)
+    move(other, mergeOtherFitFile)
     print conflictMsg
     exit(1)
 
@@ -77,7 +76,7 @@ def fitDiff(old, new):
     return added,removed,modified
 
 @gitDirOperation(repoDir)
-def writeConflictFile(conflicts):
+def writemergeConflictFile(conflicts):
     lines =  [('++', c) for c in conflicts['add']]
     lines += [('**', c) for c in conflicts['mod']]
     lines += [('*-', c) for c in conflicts['modRem']]
@@ -85,7 +84,7 @@ def writeConflictFile(conflicts):
 
     lines.sort(key=lambda a: a[1])
 
-    fileout = open(conflictFile, 'w')
+    fileout = open(mergeConflictFile, 'w')
     fileout.write('\n'.join(conflictIntructions))
     fileout.write('\n'.join(["[]  %s  %s"%l for l in lines]))
     fileout.close()
@@ -95,10 +94,11 @@ def resolve(fitTrackedData):
     removed = []
     added = []
     working = []
+    changes = False
 
-    other = readFitFile(theirFitFile)
+    other = readFitFile(mergeOtherFitFile)
 
-    for n,l in enumerate(open(conflictFile).readlines()):
+    for n,l in enumerate(open(mergeConflictFile).readlines()):
         if l.startswith('#'):
             continue
         l = l.strip()
@@ -118,11 +118,12 @@ def resolve(fitTrackedData):
         resolution = resolution.upper()
         change = change[1]
 
-        if resolution == 'T':
+        if resolution == 'O':
             if change == '-':
                 removed.append(item)
             else:
                 added.append((item, other[item]))
+            changes = True
         elif resolution == 'W':
             working.append(item)
 
@@ -132,22 +133,24 @@ def resolve(fitTrackedData):
 
     cleanupMergeArtifacts()
 
-    return working
+    print added[0]
+    print fitTrackedData[added[0][0]]
+    return changes, working
 
 def cleanupMergeArtifacts():
-    if path.exists(conflictFile):
-        remove(conflictFile)
-    if path.exists(theirFitFile):
-        remove(theirFitFile)
+    if path.exists(mergeConflictFile):
+        remove(mergeConflictFile)
+    if path.exists(mergeOtherFitFile):
+        remove(mergeOtherFitFile)
 
 @gitDirOperation(repoDir)
 def isMergeInProgress():
-    if not path.exists(conflictFile):
+    if not path.exists(mergeConflictFile):
         return False
     fitFileStatus = popen('git status --porcelain .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[0]
     merging = 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
 
-    if not merging and path.exists(conflictFile):
+    if not merging and path.exists(mergeConflictFile):
         cleanupMergeArtifacts()
 
     return merging

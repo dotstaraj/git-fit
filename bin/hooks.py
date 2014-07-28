@@ -23,9 +23,8 @@ has not been told about will abort the commit.
 
 
 @gitDirOperation(repoDir)
-def postCheckout(fitTrackedData, oldRef, newRef, branch):
-    if oldRef == newRef or branch != '1':
-        return
+def postCheckout(fitTrackedData):
+    pass
 
 @gitDirOperation(repoDir)
 def postCommit(fitTrackedData):
@@ -37,8 +36,8 @@ def postCommit(fitTrackedData):
 def preCommit(fitTrackedData):
     offenders = getStagedOffenders()
 
-    if all(len(l) == 0 for l in offenders):
-        exit(0)
+    if sum(len(l) for l in offenders) == 0:
+        exit()
 
     conflict = [('F ', i) for i in offenders[0]]
     binary = [('B ', i) for i in offenders[1]]
