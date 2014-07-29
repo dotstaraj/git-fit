@@ -17,6 +17,7 @@ class GitFitRepo:
     def __init__(self, gitDir=None):
         self.gitDir = gitDir if gitDir != None else mkdtemp()
         self.numRevisions = 0
+        self.attributes = {}
 
         cwd = getcwd()
         chdir(self.gitDir)

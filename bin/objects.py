@@ -1,9 +1,9 @@
 from fit import gitDirOperation, refreshStats, getFitSize, getHeadRevision
-from fit import repoDir, fitDir, cacheDir, syncDir, tempDir, cacheLruFile
+from fit import repoDir, fitDir, cacheDir, syncDir, tempDir, readCacheFile, writeCacheFile
 from paths import getValidFitPaths
 from subprocess import Popen as popen
 from os.path import dirname, basename, exists, join as joinpath, getsize
-from os import walk, makedirs, remove
+from os import walk, makedirs, remove, close as osclose
 from shutil import copyfile, move
 from sys import stdout
 from tempfile import mkstemp
@@ -88,8 +88,8 @@ def getUpstreamItems(fitTrackedData, paths):
     return objects
 
 @gitDirOperation(repoDir)
-def getDownstreamItems(fitTrackedData, paths):
-    return [p for p in paths if exists(p) and getsize(p) == 0 and findObject(fitTrackedData[p][0])]
+def getDownstreamItems(fitTrackedData, paths, stats):
+    return [p for p in paths if p in stats and stats[p][0] == 0 and not findObject(fitTrackedData[p][0])]
 
 @gitDirOperation(repoDir)
 def getCacheSize():
@@ -148,7 +148,7 @@ class _QuietProgressPrinter:
     def setTotalSize(self, totalSize):
         pass
 
-def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False):
+def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=False):
     global _fitstore
     
     allItems = fitTrackedData.keys()
@@ -179,16 +179,17 @@ def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False
 
     if len(needed) == 0:
         print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
-    elif verbose:
+    elif showlist:
         print
         for filePath,key,objHash,objPath,size in needed:
             print '  %.2fMB  %s'%(size/1048576, filePath)
-        print '\nThe above objects can be tranferred. Total transfer size: %.2fMB'%(totalSize/1048576)
+        print '\nThe above objects can be tranferred (total transfer size: %.2fMB).'%(totalSize/1048576)
+        print 'You may run git-fit get to start the transfer.'
     elif summary:
         print len(validPaths), 'items are being tracked'
         print len(needed), 'of the tracked items are not cached locally (need to be downloaded)'
         print '%.2fMB in total can be downloaded'%(totalSize/1048576)
-        print 'Run \'git-fit get -v\' to list these items.'
+        print 'Run \'git-fit get -l\' to list these items.'
     else:
         try:
             store = _fitstore.Store(pp.updateProgress)
@@ -198,6 +199,8 @@ def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False
         errors = []
         objects = []
         needed.sort()
+        if not exists(tempDir):
+            popen(['mkdir', '-p', tempDir]).wait()
         for filePath,key,objHash,objPath,size in needed:
             pp.newItem(filePath, size)
             
@@ -205,7 +208,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False
             # This is to prevent interrupted downloads from causing bad objects to be placed
             # in the objects cache
             (tempHandle, tempTransferFile) = mkstemp(dir=tempDir)
-            tempHandle.close()
+            osclose(tempHandle)
             key = store.check(key)
 
             try:
@@ -224,7 +227,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False
 
         pp.done()
         store.close()
-        updateCacheFile(objects)
+        updateCacheFile(objects, fitTrackedData)
 
         if len(errors) > 0:
             print 'Some items could not be transferred:'
@@ -233,7 +236,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, verbose=False, quiet=False
 
     refreshStats(touched)
 
-def put(fitTrackedData, summary=False,  verbose=False, quiet=False):
+def put(fitTrackedData, summary=False,  showlist=False, quiet=False):
     global _fitstore
     
     if len(fitTrackedData) == 0:
@@ -254,16 +257,17 @@ def put(fitTrackedData, summary=False,  verbose=False, quiet=False):
 
     if len(available) == 0:
         print 'No tranfers needed! There are no objects to put in external location for HEAD.'
-    elif verbose:
+    elif showlist:
         print
         for filePath,keyName,objPath,objInCache,size in available:
             print '  %.2fMB  %s'%(size/1048576, filePath)
-        print '\nThe above objects may need to be tranferred. Total transfer size: %.2fMB'%(totalSize/1048576)
+        print '\nThe above objects can be tranferred (maximum total transfer size: %.2fMB).'%(totalSize/1048576)
+        print 'You may run git-fit put to start the transfer.'
     elif summary:
         print len(fitTrackedData), 'items are being tracked'
         print len(available), 'of the tracked items MAY need to be sent to external location'
         print '%.2fMB maximum possible transfer size'%(totalSize/1048576)
-        print 'Run \'git-fit put -v\' to list these items.'
+        print 'Run \'git-fit put -l\' to list these items.'
     else:
         try:
             store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
@@ -300,14 +304,14 @@ def put(fitTrackedData, summary=False,  verbose=False, quiet=False):
 
         pp.done()
         store.close()
-        updateCacheFile(objects)
+        updateCacheFile(objects, fitTrackedData)
 
         if len(errors) > 0:
             print '\nSome items could not be transferred:'
             print '\n'.join(errors)
             print '\nAbove items could not be transferred:'
 
-def updateCacheFile(objects):
+def updateCacheFile(objects, fitTrackedData):
     lru = readCacheFile()
     headRev = getHeadRevision()
 
@@ -325,7 +329,7 @@ def updateCacheFile(objects):
     # objects being added to this commit might already exist
     # in cache as part of other commit, so for each lru entry,
     # clear the objects list and recreate it
-    print '\tUpdating cache file...'
+    print 'Updating cache file...',
     objRevMap = {}
     for i, (rev, objList) in enumerate(lru):
         lru[i][1] = []
@@ -337,7 +341,7 @@ def updateCacheFile(objects):
 
     # keep cache size less than twice the size of fit-tracked data
     if cacheSize > fitSize * 2:
-        print '\tPruning cache...'
+        print '\nPruning cache...',
         while cacheSize > fitSize * 2:
             rev, objects = lru.pop(0)
             for o, s in objects:
@@ -345,4 +349,4 @@ def updateCacheFile(objects):
                 cacheSize -= s
 
     writeCacheFile(lru)
-    print '\tDone.'
+    print 'Done.'

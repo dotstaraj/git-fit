@@ -29,7 +29,8 @@ def postCheckout(fitTrackedData):
 @gitDirOperation(repoDir)
 def postCommit(fitTrackedData):
     cleanupMergeArtifacts()
-    # 1 notify warning if they have changes not committed
+    # 1 notify warning if un-committed changes exist
+    # 2 Notify warning to unignore items that were untracked in the commit
     # 2 cache items commmited
 
 @gitDirOperation(repoDir)

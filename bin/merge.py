@@ -1,5 +1,5 @@
-from fit import gitDirOperation, repoDir, readFitFile, writeFitFile
-from fit import mergeOtherFitFile, mergeConflictFile
+from fit import gitDirOperation, repoDir, fitFile, readFitFile, writeFitFile
+from fit import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles
 from os import path, remove
 from shutil import move
 from subprocess import Popen as popen, PIPE
@@ -7,21 +7,22 @@ import re
 
 conflictMsg = '''
 ************ git-fit found conflicts during the merge ************
-Either a merge, rebase, or other merge-based operation caused
-conflicts in fit-tracked items. Fit has already merged in the non-
-conflicting changes. However, the conflicts need to be manually
-resolved. A "FIT_MERGE" file has been created in the root of your
-project directory to facilitate this process, so take a look at
-that file for instructions on how to proceed. A commit will not be
-possible until all conflicts have been resolved as instructed in
-this "FIT_MERGE" file.
+Either a merge, rebase, or other merge-based git operation caused
+conflicts in fit. Fit has already merged in the non-conflicting
+changes. However, the conflicts need to be manually resolved
+before git-fit can resume usual operation. Open the .fit file in a
+text editor for instructions on how to proceed. A commit will not
+be possible until all conflicts have been resolved as instructed
+in the .fit file and git-fit save is run without any arguments.
 ************ git-fit found conflicts during the merge ************
 '''
 
 conflictIntructions = '''\
+# Conflict Resolution Form (DO NOT remove this line & make ONLY the changes described below)
+# ==========================
 # Each row below indicates an item conflict and consists of the following three columns:
 #
-#      <SELECTION_ENTRY_BOX>  <"MINE"-CHANGE><"OTHER"-CHANGE>  <ITEM>
+#      <SELECTION_ENTRY_BOX>  <"MINE"_CHANGE_SYMBOL><"OTHER"_CHANGE_SYMBOL>  <ITEM_PATH>
 #
 # Example:
 # (symbol meanings: "*" = modified, "+" = added, "-" = removed)
@@ -59,9 +60,9 @@ def mergeDriver(common, mine, other):
         writeFitFile(merged, mine)
         exit(0)
 
-    writeFitFile(merged)
-    writemergeConflictFile(conflicts)
+    writeFitFile(merged, mergeMineFitFile)
     move(other, mergeOtherFitFile)
+    prepareResolutionForm(conflicts)
     print conflictMsg
     exit(1)
 
@@ -76,7 +77,7 @@ def fitDiff(old, new):
     return added,removed,modified
 
 @gitDirOperation(repoDir)
-def writemergeConflictFile(conflicts):
+def prepareResolutionForm(conflicts):
     lines =  [('++', c) for c in conflicts['add']]
     lines += [('**', c) for c in conflicts['mod']]
     lines += [('*-', c) for c in conflicts['modRem']]
@@ -84,7 +85,7 @@ def writemergeConflictFile(conflicts):
 
     lines.sort(key=lambda a: a[1])
 
-    fileout = open(mergeConflictFile, 'w')
+    fileout = open(fitFile, 'w')
     fileout.write('\n'.join(conflictIntructions))
     fileout.write('\n'.join(["[]  %s  %s"%l for l in lines]))
     fileout.close()
@@ -98,7 +99,7 @@ def resolve(fitTrackedData):
 
     other = readFitFile(mergeOtherFitFile)
 
-    for n,l in enumerate(open(mergeConflictFile).readlines()):
+    for n,l in enumerate(open(fitFile).readlines()):
         if l.startswith('#'):
             continue
         l = l.strip()
@@ -107,12 +108,12 @@ def resolve(fitTrackedData):
 
         match = _conflictLine_re.match(l)
         if not match:
-            print 'error: Line %d in the FIT_MERGE file has an error. Cannot continue...'%(n + 1)
+            print 'merge error: Line %d in the .fit file has an error. Cannot continue...'%(n + 1)
             return
 
         resolution, change, item = match.groups()
         if resolution == '':
-            print 'error: No selection has been made for item on line %d in the FIT_MERGE file. Cannot continue...'%(n + 1)
+            print 'merge error: No selection has been made for item on line %d in the .fit file. Cannot continue...'%(n + 1)
             return
 
         resolution = resolution.upper()
@@ -138,19 +139,21 @@ def resolve(fitTrackedData):
     return changes, working
 
 def cleanupMergeArtifacts():
-    if path.exists(mergeConflictFile):
-        remove(mergeConflictFile)
+    if path.exists(mergeMineFitFile):
+        move(mergeMineFitFile, fitFile)
     if path.exists(mergeOtherFitFile):
         remove(mergeOtherFitFile)
 
 @gitDirOperation(repoDir)
 def isMergeInProgress():
-    if not path.exists(mergeConflictFile):
-        return False
-    fitFileStatus = popen('git status --porcelain .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[0]
+    fitFileStatus = popen('git status --porcelain .fit'.split(), stdout=PIPE).communicate()[0].strip()
+    if fitFileStatus:
+        fitFileStatus = fitFileStatus.split()[0]
     merging = 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
+    merging &= path.exists(fitFile) and fitFile not in filterBinaryFiles([fitFile])
+    merging &= open(fitFile).next().strip() == conflictIntructions[0]
 
-    if not merging and path.exists(mergeConflictFile):
+    if not merging:
         cleanupMergeArtifacts()
 
     return merging
