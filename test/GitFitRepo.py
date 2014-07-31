@@ -69,7 +69,7 @@ class GitFitRepo:
 
     @gitDirOperation
     def setFitAttr(self, path, fit=False):
-        opts = {'path': path, 'fit': '' if fit else '-', 'dirpattern': '/**' if isdir(path) else ''}
+        self.attributes[path] = {'path': path, 'fit': '' if fit else '-', 'dirpattern': '/**' if isdir(path) else ''}
         shell('printf "%(path)s%(dirpattern)s %(fit)sfit\n" >> .gitattributes'%opts)
 
     @gitDirOperation
@@ -84,6 +84,8 @@ class GitFitRepo:
 
         shell('git checkout master' + '^'*revisionFromHead)
 
+    def merge(self, revision):
+        pass
+
     def destroy(self):
         rmtree(self.gitDir)
-

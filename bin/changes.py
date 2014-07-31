@@ -1,12 +1,12 @@
-from fit import fitStats, fitFile, gitDirOperation, repoDir
-from fit import readStatFile, writeStatFile, refreshStats, writeFitFile
+from fit import fitStats, fitFile, gitDirOperation, repoDir, savesDir
+from fit import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
 from fit import filterBinaryFiles
-from objects import findObject, placeObject, getObjectInfo, getUpstreamItems, getDownstreamItems
+from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
 from paths import getValidFitPaths
 import merge
 from subprocess import Popen as popen, PIPE
-from os.path import exists, dirname, getsize
-from os import remove, makedirs, stat
+from os.path import exists, dirname
+from os import remove, makedirs, stat, listdir
 from shutil import copyfile
 from itertools import chain
 import re
@@ -89,7 +89,7 @@ def computeHashes(items):
         i += 1
         print progress_fmt%(i*100./numItems, i, numItems),
         stdout.flush()
-    print '\r'+(' '*(9+int(numDigits)*2))+'\r'
+    print '\r'+(' '*(45+int(numDigits)*2))+'\r'
     return hashes
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
@@ -283,13 +283,17 @@ def save(fitTrackedData, quiet=False, pathArgs=None):
             return
 
         updateFitFile, paths = result
-        updateFitFile |= saveItems(fitTrackedData, paths=paths, quiet=True)
+        changes = saveItems(fitTrackedData, paths=paths, quiet=True)
     else:
-        updateFitFile = saveItems(fitTrackedData, pathArgs=pathArgs)
+        changes = saveItems(fitTrackedData, pathArgs=pathArgs)
 
-    if updateFitFile:
-        writeFitFile(fitTrackedData)
-        popen('git add -f'.split()+[fitFile]).wait()
+    if not (updateFitFile or changes):
+        return
+
+    writeFitFile(fitTrackedData)
+    popen('git add -f'.split()+[fitFile]).wait()
+    if changes and changes[0]:
+        _saveCache(changes[0])
 
 @gitDirOperation(repoDir)
 def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
@@ -312,5 +316,23 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     for i in untracked:
         del fitTrackedData[i]
 
-    return True
+    return modified, removed|untracked
 
+def _saveCache(newItems):
+    for l in listdir(savesDir):
+        savesFile = joinpath(savesDir, l)
+        oldSaveItems = readFitFile(savesFile)
+        removeObjects(h for f,(h,s) in oldSaveItems.iteritems() if f not in newItems)
+        remove(savesFile)
+
+    fitFileHash = popen('git ls-files -s .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[1]
+    writeSaveFile(newItems, joinpath(savesDir,fitFileHash))
+
+    numNewItems = len(newItems)
+    numDigits = str(len(str(numNewItems)+''))
+    progress_fmt = '\rCaching new and modified items...%6.2f%%  '+'%'+numDigits+'s/%'+numDigits+'s'
+    def progress(i):
+        print progress_fmt%(i*100./numNewItems, i, numNewItems),
+        stdout.flush()
+    placeObjects((h,f) for f,(h,s) in newItems.iteritems(), progressCallback=progress)
+    print '\r'+(' '*(43+int(numDigits)*2))+'\r'

@@ -1,14 +1,14 @@
 #!/usr/bin/env python2.7
 
 from argparse import ArgumentParser
-from os import getcwd, chdir, mkdir, chmod
-from os.path import dirname, realpath, relpath, join as joinpath, exists
+from os import mkdir, chmod
+from os.path import dirname, realpath, join as joinpath, exists
 import sys
-from subprocess import call
 sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
 from sys import argv
-from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, tempDir
+from subprocess import call
+from fit import fitDir, cacheDir, repoDir, gitDir, tempDir, commitsDir, savesDir
 from fit import mergeMineFitFile, readFitFile, firstTimeFile, printAsText
 import hooks, objects, merge, changes
 import stat
@@ -63,7 +63,8 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
         print 'Preparing this repository for use with git-fit...'
         mkdir(fitDir)
         mkdir(cacheDir)
-        mkdir(syncDir)
+        mkdir(commitsDir)
+        mkdir(savesDir)
         mkdir(tempDir)
         changes.restore(fitTrackedData, quiet=True)
     elif exists(firstTimeFile):
@@ -184,7 +185,7 @@ Usage:
     git-fit save    [<PATH>...]
     git-fit restore [<PATH>...]
     git-fit get     [--summary] [--list] [--quiet] [<PATH>...]
-    git-fit put     [--summary] [--list] [--quiet]
+    git-fit put     [--summary] [--list] [--quiet] [--force <PATH>...]
 '''
 
 cmdGetPutOpts='''

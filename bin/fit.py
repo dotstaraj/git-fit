@@ -16,8 +16,8 @@ gitDir = popen('git rev-parse --git-dir'.split(), stdout=PIPE).communicate()[0].
 fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')
 cacheDir = path.join(fitDir, 'objects')
-syncDir = path.join(cacheDir, 'tosync')
-saveFile = path.join(fitDir, 'saved')
+saveDir = path.join(fitDir, 'saves')
+commitsDir = path.join(fitDir, 'commits')
 statFile = path.join(fitDir, 'stat')
 mergeMineFitFile = path.join(fitDir, 'merge-mine')
 mergeOtherFitFile = path.join(fitDir, 'merge-other')
@@ -68,9 +68,12 @@ def fitStats(filename):
     return stats.st_size, stats.st_mtime, stats.st_ctime, stats.st_ino
 
 def readFitFile(filePath=fitFile):
+    if not (path.exists(filePath) and path.getsize(filePath) > 0):
+        return {}
+        
     if filePath in filterBinaryFiles([filePath]):
         from gzip import open as gz
-        return load(gz(filePath)) if path.exists(filePath) and path.getsize(filePath) > 0 else {}
+        return load(gz(filePath))
     else:
         fitFileIn = open(filePath)
         fitData = fitTreeToMap(_readFitFileRec(fitFileIn))
