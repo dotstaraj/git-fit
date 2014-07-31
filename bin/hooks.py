@@ -1,7 +1,8 @@
 from fit import fitFile, writeFitFile, gitDirOperation, repoDir
-from changes import getStagedOffenders
+from fit import readFitFile, readFitFileForRevision
+from changes import getStagedOffenders, saveItems, restoreItems
 from objects import findObject, placeObject
-from merge import cleanupMergeArtifacts
+from merge import cleanupMergeArtifacts, getMergedFit
 from subprocess import PIPE, Popen as popen
 from textwrap import fill as wrapline
 from os import stat
@@ -23,18 +24,33 @@ has not been told about will abort the commit.
 
 
 @gitDirOperation(repoDir)
-def postCheckout(fitTrackedData):
-    pass
+def postCheckout(fitTrackedData, oldRev):
+    mergeOld = readFitFileForRevision(oldRev)
+    mergeNew = fitTrackedData
+    mergeWorking = dict(mergeOld)
+    saveItems(mergeWorking, quiet=True)
+    mergeWorking, conflicts, modified, added, removed = getMergedFit(mergeOld, mergeWorking, mergeNew)
+    restoreItems(mergeWorking, modified, added, removed, quiet=True)
 
 @gitDirOperation(repoDir)
 def postCommit(fitTrackedData):
     cleanupMergeArtifacts()
     # 1 notify warning if un-committed changes exist
     # 2 Notify warning to unignore items that were untracked in the commit
-    # 2 cache items commmited
+    # 3 cache new committed items
+        '''
+        print 'Caching new and modified items...',
+        for filePath,(objHash, size) in modified.iteritems():
+            placeObject(objHash, filePath)
+        print 'Done.'
+        '''
 
 @gitDirOperation(repoDir)
 def preCommit(fitTrackedData):
+    _checkOffenders(fitTrackedData)
+    _checkObjectsIntegrity(fitTrackedData)
+
+def _checkOffenders(fitTrackedData):
     offenders = getStagedOffenders()
 
     if sum(len(l) for l in offenders) == 0:
@@ -49,3 +65,10 @@ def preCommit(fitTrackedData):
     print '\n'.join([wrapline(l) for l in infoMsg[5:]])
 
     exit(1)
+
+def _checkObjectsIntegrity(fitTrackedData):
+    oldFit = readFitFileForRevision('HEAD')
+    newFit = fitTrackedData
+    workingFit = dict(oldFit)
+    saveItems(workingFit, quiet=True)
+    workingFit, conflicts, modified, added, removed = getMergedFit(oldFit, workingFit, newFit)

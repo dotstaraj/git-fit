@@ -182,7 +182,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
     elif showlist:
         print
         for filePath,key,objHash,objPath,size in needed:
-            print '  %.2fMB  %s'%(size/1048576, filePath)
+            print '  %6.2fMB  %s'%(size/1048576, filePath)
         print '\nThe above objects can be tranferred (total transfer size: %.2fMB).'%(totalSize/1048576)
         print 'You may run git-fit get to start the transfer.'
     elif summary:
@@ -260,7 +260,7 @@ def put(fitTrackedData, summary=False,  showlist=False, quiet=False):
     elif showlist:
         print
         for filePath,keyName,objPath,objInCache,size in available:
-            print '  %.2fMB  %s'%(size/1048576, filePath)
+            print '  %6.2fMB  %s'%(size/1048576, filePath)
         print '\nThe above objects can be tranferred (maximum total transfer size: %.2fMB).'%(totalSize/1048576)
         print 'You may run git-fit put to start the transfer.'
     elif summary:

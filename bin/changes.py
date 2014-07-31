@@ -89,7 +89,7 @@ def computeHashes(items):
         i += 1
         print progress_fmt%(i*100./numItems, i, numItems),
         stdout.flush()
-    print '\rComputing hashes for new objects...Done.'+' '*(9+int(numDigits)*2)
+    print '\r'+(' '*(9+int(numDigits)*2))+'\r'
     return hashes
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
@@ -228,7 +228,13 @@ def restore(fitTrackedData, quiet=False, pathArgs=None):
         return
 
     modified, added, removed, untracked = changes
+    if restoreItems(fitTrackedData, modified, added, removed, quiet=quiet) > 0 and not quiet:
+        print '\nFor %d of the fit objects just restored, only empty stub files were created in their'%missing
+        print 'stead. This is because those objects are not cached and must be downloaded. To start'
+        print 'this download, run \'git-fit get\' with the same path arguments passed to'
+        print 'git-fit restore (if any).\n'
 
+def restoreItems(fitTrackedData, modified, added, removed, quiet=False):
     for i in sorted(added):
         remove(i)
         if not quiet:
@@ -237,24 +243,18 @@ def restore(fitTrackedData, quiet=False, pathArgs=None):
     missing = 0
     touched = {}
 
-    result = _restoreItems('Added', sorted(removed), fitTrackedData, quiet=quiet)
+    result = _restorePopulate('Added', sorted(removed), fitTrackedData, quiet=quiet)
     missing += result[0]
     touched.update(result[1])
-    result = _restoreItems('Replaced', sorted(modified), fitTrackedData, quiet=quiet)
+    result = _restorePopulate('Restored', sorted(modified), fitTrackedData, quiet=quiet)
     missing += result[0]
     touched.update(result[1])
-
-    print
 
     refreshStats(touched)
 
-    if missing > 0 and not quiet:
-        print 'For %d of the fit objects just restored, only empty stub files were created in their'%missing
-        print 'stead. This is because those objects are not cached and must be downloaded. To start'
-        print 'this download, run \'git-fit get\' with the same path arguments passed to'
-        print 'git-fit restore (if any).\n'
+    return missing
 
-def _restoreItems(restoreType, objects, fitTrackedData, quiet=False):
+def _restorePopulate(restoreType, objects, fitTrackedData, quiet=False):
     missing = 0
     touched = {}
     for filePath in objects:
@@ -276,26 +276,27 @@ def _restoreItems(restoreType, objects, fitTrackedData, quiet=False):
     return (missing, touched)
 
 @gitDirOperation(repoDir)
-def save(fitTrackedData, pathArgs=None):
+def save(fitTrackedData, quiet=False, pathArgs=None):
     if merge.isMergeInProgress():
         result = merge.resolve(fitTrackedData)
         if not result:
             return
 
         updateFitFile, paths = result
-        updateFitFile |= _saveItems(fitTrackedData, paths=paths)
+        updateFitFile |= saveItems(fitTrackedData, paths=paths, quiet=True)
     else:
-        updateFitFile = _saveItems(fitTrackedData, pathArgs=pathArgs)
+        updateFitFile = saveItems(fitTrackedData, pathArgs=pathArgs)
 
-    if True:
+    if updateFitFile:
         writeFitFile(fitTrackedData)
         popen('git add -f'.split()+[fitFile]).wait()
 
 @gitDirOperation(repoDir)
-def _saveItems(fitTrackedData, paths=None, pathArgs=None):
+def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     changes = checkForChanges(fitTrackedData, paths=paths, pathArgs=pathArgs)
     if not changes:
-        print 'Nothing to save (no changes detected).'
+        if not quiet:
+            print 'Nothing to save (no changes detected).'
         return False
     
     modified, added, removed, untracked = changes
@@ -310,12 +311,6 @@ def _saveItems(fitTrackedData, paths=None, pathArgs=None):
         del fitTrackedData[i]
     for i in untracked:
         del fitTrackedData[i]
-
-    if len(modified) > 0:
-        print 'Caching new and modified items...',
-        for filePath,(objHash, size) in modified.iteritems():
-            placeObject(objHash, filePath)
-        print 'Done.'
 
     return True
 

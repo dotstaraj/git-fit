@@ -8,8 +8,8 @@ from subprocess import call
 sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
 sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
 from sys import argv
-from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, mergeMineFitFile
-from fit import readFitFile, firstTimeFile, printAsText
+from fit import fitDir, cacheDir, syncDir, repoDir, gitDir, tempDir
+from fit import mergeMineFitFile, readFitFile, firstTimeFile, printAsText
 import hooks, objects, merge, changes
 import stat
 
@@ -44,8 +44,10 @@ def main():
         hooks.preCommit(fitTrackedData)
     elif opts.git == 'post-commit':
         hooks.postCommit(fitTrackedData)
-    elif opts.git == 'post-merge' or opts.git == 'post-checkout' and opts.paths[0] != opts.paths[1] and opts.paths[2] == '1':
-        hooks.postCheckout(fitTrackedData)
+    elif opts.git == 'post-merge':
+        hooks.postCheckout(fitTrackedData, 'HEAD@{1}')
+    elif opts.git == 'post-checkout' and opts.paths[2] == '1' and opts.paths[0] != opts.paths[1]:
+        hooks.postCheckout(fitTrackedData, opts.paths[0])
     elif opts.git == 'merge_driver':
         merge.mergeDriver(*(opts.paths[:3]))
     elif opts.git == 'text_output':
@@ -62,6 +64,7 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
         mkdir(fitDir)
         mkdir(cacheDir)
         mkdir(syncDir)
+        mkdir(tempDir)
         changes.restore(fitTrackedData, quiet=True)
     elif exists(firstTimeFile):
         firstTimeCount = int(open(firstTimeFile).read())

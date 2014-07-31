@@ -1,5 +1,6 @@
 from subprocess import Popen as popen, PIPE
-from os import stat, path, chdir, getcwd
+from os import stat, path, chdir, getcwd, devnull, close as osclose, remove
+from tempfile import mkstemp
 from json import load, dump
 from paths import fitMapToTree, fitTreeToMap
 import re
@@ -16,12 +17,12 @@ fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')
 cacheDir = path.join(fitDir, 'objects')
 syncDir = path.join(cacheDir, 'tosync')
+saveFile = path.join(fitDir, 'saved')
 statFile = path.join(fitDir, 'stat')
 mergeMineFitFile = path.join(fitDir, 'merge-mine')
 mergeOtherFitFile = path.join(fitDir, 'merge-other')
 firstTimeFile = path.join(fitDir, 'first-time')
 cacheLruFile = path.join(fitDir, 'cache-lru')
-savedFile = path.join(fitDir, 'save')
 tempDir = path.join(fitDir, 'temp')
 
 _fitFileItemRgx = re.compile('([^:]+):\[([^,]+),(\d+)\],?')
@@ -150,6 +151,21 @@ def getFitSize(fitTrackedData):
 
 def getHeadRevision():
     return popen('git rev-parse HEAD'.split(), stdout=PIPE).communicate()[0].strip()
+
+def readFitFileForRevision(rev):
+    fitData = popen(('git show %s:.fit'%rev).split(), stdout=PIPE, stderr=PIPE).communicate()[0]
+    if len(fitData) == 0:
+        return {}
+
+    (tempHandle, tempFile) = mkstemp(dir=tempDir)
+    osclose(tempHandle)
+    tempHandle = open(tempFile, 'wb')
+    tempHandle.write(fitData)
+    tempHandle.close()
+
+    fitData = readFitFile(tempFile)
+    remove(tempFile)
+    return fitData
 
 def filterBinaryFiles(files):
     binaryFiles = []

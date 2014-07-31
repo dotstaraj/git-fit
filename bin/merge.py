@@ -54,13 +54,13 @@ conflictIntructions = '''\
 _conflictLine_re = re.compile('\s*\[([MOW]?)\]\s+(\*\*|\+\+|\*-|-\*)\s+(.+)\s*$')
 
 def mergeDriver(common, mine, other):
-    merged, conflicts = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
+    mergedFit, conflicts, modified, added, removed = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
 
     if not conflicts:
-        writeFitFile(merged, mine)
+        writeFitFile(mergedFit, mine)
         exit(0)
 
-    writeFitFile(merged, mergeMineFitFile)
+    writeFitFile(mergedFit, mergeMineFitFile)
     move(other, mergeOtherFitFile)
     prepareResolutionForm(conflicts)
     print conflictMsg
@@ -70,11 +70,11 @@ def fitDiff(old, new):
     oldItems = set(old)
     newItems = set(new)
 
+    modified = {i for i in (oldItems & newItems) if old[i] != new[i]}
     added = newItems - oldItems
     removed = oldItems - newItems
-    modified = {i for i in (oldItems & newItems) if old[i] != new[i]}
 
-    return added,removed,modified
+    return modified,added,removed
 
 @gitDirOperation(repoDir)
 def prepareResolutionForm(conflicts):
@@ -159,8 +159,8 @@ def isMergeInProgress():
     return merging
 
 def getMergedFit(common, mine, other):
-    mineAdd,mineRem,mineMod = fitDiff(common, mine)
-    otherAdd,otherRem,otherMod = fitDiff(common, other)
+    mineMod,mineAdd,mineRem = fitDiff(common, mine)
+    otherMod,otherAdd,otherRem = fitDiff(common, other)
 
     addCon = {i for i in (mineAdd & otherAdd) if mine[i] != other[i]}
     modCon = {i for i in (mineMod & otherMod) if mine[i] != other[i]}
@@ -169,9 +169,13 @@ def getMergedFit(common, mine, other):
 
     allCon = addCon | modCon | modRemCon | remModCon
     
-    for i in (otherAdd | otherMod) - allCon:
+    modified = otherMod - allCon
+    added = otherAdd - allCon
+    removed = (otherRem - mineRem) - allCon
+
+    for i in modified | added:
         mine[i] = other[i]
-    for i in (otherRem - mineRem) - allCon:
+    for i in removed:
         del mine[i]
 
     conflicts = None
@@ -184,4 +188,4 @@ def getMergedFit(common, mine, other):
             'remMod': remModCon
         }
 
-    return mine, conflicts
+    return mine, modified, added, removed, conflicts
