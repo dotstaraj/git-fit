@@ -7,6 +7,7 @@ from sys import argv
 from subprocess import call
 from fitlib import fitDir, cacheDir, repoDir, gitDir, tempDir, commitsDir, savesDir
 from fitlib import mergeMineFitFile, readFitFile, firstTimeFile, printAsText
+from fitlib import readFitFileForRevision, fitFileDiffFromRevision
 from fitlib import hooks, objects, merge, changes
 import stat
 
@@ -40,10 +41,17 @@ def main():
         hooks.preCommit(fitTrackedData)
     elif opts.git == 'post-commit':
         hooks.postCommit(fitTrackedData)
-    elif opts.git == 'post-merge':
-        hooks.postCheckout(fitTrackedData, 'HEAD@{1}')
-    elif opts.git == 'post-checkout' and opts.paths[2] == '1' and opts.paths[0] != opts.paths[1]:
-        hooks.postCheckout(fitTrackedData, opts.paths[0])
+    elif opts.git_head_change:
+        autoMergeRestore = (
+                opts.git == 'post-merge'
+                or (opts.git == 'post-rewrite' and opts.paths[0] == 'rebase')
+                or (opts.git == 'post-checkout' and opts.paths[0] == '1')
+            ) and fitFileDiffFromRevision()
+
+        if autoMergeRestore:
+            lastFitTrackedData = readFitFileForRevision('HEAD@{1}')
+            if fitTrackedData != lastFitTrackedData:
+                hooks.postCheckout(fitTrackedData, lastFitTrackedData)
     elif opts.git == 'merge-driver':
         merge.mergeDriver(*(opts.paths[:3]))
     elif opts.git == 'text-output':
@@ -90,25 +98,17 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
     if nohooks:
         return
 
-    f = open(joinpath(gitDir, 'hooks', 'pre-commit'), 'w')
-    f.write('\n$fitt --git=pre-commit\n')
-    f.close()
-    chmod(joinpath(gitDir, 'hooks', 'pre-commit'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    def createHook(name, args=''):
+        f = open(joinpath(gitDir, 'hooks', name), 'w')
+        f.write('\n$fitt --git=%s %s\n'%(name,args))
+        f.close()
+        chmod(joinpath(gitDir, 'hooks', name), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     
-    f = open(joinpath(gitDir, 'hooks', 'post-commit'), 'w')
-    f.write('\n$fitt --git=post-commit\n')
-    f.close()
-    chmod(joinpath(gitDir, 'hooks', 'post-commit'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-
-    f = open(joinpath(gitDir, 'hooks', 'post-checkout'), 'w')
-    f.write('\n$fitt --git=post-checkout ${1} ${2} ${3}\n')
-    f.close()
-    chmod(joinpath(gitDir, 'hooks', 'post-checkout'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
-
-    f = open(joinpath(gitDir, 'hooks', 'post-merge'), 'w')
-    f.write('\n$fitt --git=post-merge\n')
-    f.close()
-    chmod(joinpath(gitDir, 'hooks', 'post-merge'), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    createHook('pre-commit')
+    createHook('post-commit')
+    createHook('post-checkout', '--git-head-change ${3}')
+    createHook('post-merge', '--git-head-change')
+    createHook('post-rewrite', '--git-head-change  ${1}')
 
     cmd = '''
         git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
@@ -129,7 +129,8 @@ def getOpts():
             exit()
         parser = ArgumentParser(add_help=False, usage='git-fit [--help] [--legend] [--all] [<PATH>...]')
         parser.add_argument('--no-hooks', action='store_true')
-        parser.add_argument('--git', choices=('post-commit','pre-commit','post-checkout','post-merge','merge-driver','text-output'))
+        parser.add_argument('--git-head-change', action='store_true')
+        parser.add_argument('--git', choices=('post-commit','pre-commit','post-checkout','post-merge','post-rewrite','merge-driver','text-output'))
         parser.add_argument('--all', '-a', action='store_true')
         parser.add_argument('--legend', '-l', action='store_true')
         parser.add_argument('paths', nargs='*')

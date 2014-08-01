@@ -1,5 +1,4 @@
-from . import gitDirOperation, repoDir, savesDir, commitsDir
-from . import readFitFileForRevision, getHeadRevision
+from . import gitDirOperation, repoDir, savesDir, commitsDir, getHeadRevision
 from changes import getStagedOffenders, saveItems, restoreItems
 from merge import getMergedFit
 from subprocess import PIPE, Popen as popen
@@ -25,9 +24,7 @@ has not been told about will abort the commit.
 
 
 @gitDirOperation(repoDir)
-def postCheckout(fitTrackedData, oldRev):
-    mergeOld = readFitFileForRevision(oldRev)
-    mergeNew = fitTrackedData
+def postCheckout(mergeOld, mergeNew):
     mergeWorking = dict(mergeOld)
     saveItems(mergeWorking, quiet=True)
     mergeWorking, conflicts, modified, added, removed = getMergedFit(mergeOld, mergeWorking, mergeNew)
@@ -48,7 +45,7 @@ def preCommit(fitTrackedData):
     offenders = getStagedOffenders()
 
     if sum(len(l) for l in offenders) == 0:
-        exit()
+        exit(0)
 
     conflict = [('F ', i) for i in offenders[0]]
     binary = [('B ', i) for i in offenders[1]]

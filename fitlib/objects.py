@@ -1,4 +1,4 @@
-from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getHeadRevision
+from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getCommitFile
 from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir
 from paths import getValidFitPaths
 from subprocess import Popen as popen, PIPE
@@ -8,15 +8,12 @@ from shutil import copyfile, move
 from sys import stdout
 from tempfile import mkstemp
 
-_fitstore = None
-def loadDataStore():
+def getDataStore(progressCallback):
     moduleName = popen('git config fit.datastore.moduleName'.split(), stdout=PIPE).communicate()[0].strip()
     modulePath = popen('git config fit.datastore.modulePath'.split(), stdout=PIPE).communicate()[0].strip()
 
     if not moduleName:
-        print 'error: No external data store is configured. Check the'
-        print '       fit.datastore.module(Name|Path) keys in git config.'
-        exit(1)
+        raise Exception('error: No external data store is configured. Check the fit.datastore keys in git config.')
 
     if modulePath:
         import sys
@@ -24,12 +21,10 @@ def loadDataStore():
 
     try:
         from importlib import import_module
-        global _fitstore
-        _fitstore = import_module(moduleName)
+        return import_module(moduleName).Store(progressCallback)
     except Exception as e:
         print 'error: Could not load the data store configured in fit.datastore.'
-        print e
-        exit(1)
+        raise
 
 @gitDirOperation(repoDir)
 def findObject(obj):
@@ -55,7 +50,7 @@ def removeObjects(objects):
 
 @gitDirOperation(repoDir)
 def getUpstreamItems(fitTrackedData, paths):
-    return set(readFitFile(joinpath(commitsDir, getHeadRevision())))
+    return set(readFitFile(getCommitFile()))
 
 @gitDirOperation(repoDir)
 def getDownstreamItems(fitTrackedData, paths, stats):
@@ -120,14 +115,10 @@ class _QuietProgressPrinter:
 def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=False):    
     allItems = fitTrackedData.keys()
     validPaths = getValidFitPaths(pathArgs, allItems, repoDir) if pathArgs else allItems
-    if len(fitTrackedData) == 0 or len(validPaths) == 0:
-        return
-
-    pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
 
     needed = []   # not in working tree nor in cache, must be downloaded
     touched = {}
-    
+
     for filePath in validPaths:
         objHash, size = fitTrackedData[filePath]
         if exists(filePath) and getsize(filePath) == 0:
@@ -142,10 +133,9 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
                 needed.append((filePath, key, objHash, objPath, size))
 
     totalSize = sum([size for f,k,h,p,size in needed])
-    pp.setTotalSize(totalSize)
 
     if len(needed) == 0:
-        print 'No tranfers needed! Working copy has been populated with all', len(fitTrackedData), 'tracked items.'
+        print 'No tranfers needed! %s items retrieved from cache and the rest already exist.'%len(touched)
     elif showlist:
         print
         for filePath,k,h,p,size in needed:
@@ -158,12 +148,9 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
         print '%.2fMB in total can be downloaded'%(totalSize/1048576)
         print 'Run \'git-fit get -l\' to list these items.'
     else:
-        try:
-            loadDataStore()
-            store = _fitstore.Store(pp.updateProgress)
-        except Exception as e:
-            print e
-            return
+        pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
+        pp.setTotalSize(totalSize)
+        store = getDataStore(pp.updateProgress)
         errors = []
         objects = []
         needed.sort()
@@ -207,12 +194,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
     refreshStats(touched)
 
 def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=False, quiet=False):
-    if len(fitTrackedData) == 0:
-        return
-
-    pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
-
-    commitsFile = joinpath(commitsDir, getHeadRevision())
+    commitsFile = getCommitFile()
     commitsFitData = readFitFile(commitsFile)
     available = []
     for filePath,(objHash, size) in commitsFitData.iteritems():
@@ -221,10 +203,9 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
         available.append((filePath, key, objHash, objPath, size))
 
     totalSize = sum([size for f,k,h,p,size in available])
-    pp.setTotalSize(totalSize)
 
     if len(available) == 0:
-        print 'No tranfers needed! There are no objects to put in external location for HEAD.'
+        print 'No tranfers needed! There are no cached objects to put in external location for HEAD.'
     elif showlist:
         print
         for filePath,k,h,p,size in available:
@@ -237,12 +218,9 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
         print '%.2fMB maximum possible transfer size'%(totalSize/1048576)
         print 'Run \'git-fit put -l\' to list these items.'
     else:
-        try:
-            loadDataStore()
-            store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
-        except Exception as e:
-            print e
-            return
+        pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
+        pp.setTotalSize(totalSize)
+        store = getDataStore(pp.updateProgress)
         errors = []
         objects = []
         available.sort()

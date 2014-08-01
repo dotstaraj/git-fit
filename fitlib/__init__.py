@@ -153,8 +153,15 @@ def refreshStats(items):
 def getFitSize(fitTrackedData):
     return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
 
+def getCommitFile(rev=None):
+    return path.join(commitsDir, rev or getHeadRevision() or '---')
+
 def getHeadRevision():
     return popen('git rev-parse HEAD'.split(), stdout=PIPE).communicate()[0].strip()
+
+def fitFileDiffFromRevision(rev='HEAD@{1}'):
+    stdout, stderr = popen(('git diff --name-only %s -- .fit'%rev).split(), stdout=PIPE).communicate()
+    return stdout.strip() != '' and stderr.strip() == ''
 
 def readFitFileForRevision(rev='HEAD'):
     fitData = popen(('git show %s:.fit'%rev).split(), stdout=PIPE, stderr=PIPE).communicate()[0]

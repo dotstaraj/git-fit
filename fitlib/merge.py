@@ -146,7 +146,8 @@ def isMergeInProgress():
     if fitFileStatus:
         fitFileStatus = fitFileStatus.split()[0]
     merging = 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
-    merging &= path.exists(fitFile) and fitFile not in filterBinaryFiles([fitFile]) and open(fitFile).next().strip() == conflictIntructions[0]
+    merging = merging and path.exists(fitFile) and fitFile not in filterBinaryFiles([fitFile])
+    merging = merging and open(fitFile).next().strip() == conflictIntructions[0]
 
     if not merging:
         cleanupMergeArtifacts()
