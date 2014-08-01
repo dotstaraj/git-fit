@@ -8,7 +8,8 @@ import re
 # Get the repo root directory if inside one, otherwise exit
 _p = popen('git rev-parse --show-toplevel'.split(), stdout=PIPE)
 repoDir = _p.communicate()[0].strip()
-_p.returncode == 0 or exit(_p.returncode)
+if _p.returncode != 0:
+    raise Exception('Could not determine git working tree.')
 
 # Get some more directory/file paths we're interested in
 selfDir = path.dirname(path.realpath(__file__))
@@ -16,7 +17,7 @@ gitDir = popen('git rev-parse --git-dir'.split(), stdout=PIPE).communicate()[0].
 fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')
 cacheDir = path.join(fitDir, 'objects')
-saveDir = path.join(fitDir, 'saves')
+savesDir = path.join(fitDir, 'saves')
 commitsDir = path.join(fitDir, 'commits')
 statFile = path.join(fitDir, 'stat')
 mergeMineFitFile = path.join(fitDir, 'merge-mine')
@@ -70,7 +71,7 @@ def fitStats(filename):
 def readFitFile(filePath=fitFile):
     if not (path.exists(filePath) and path.getsize(filePath) > 0):
         return {}
-        
+
     if filePath in filterBinaryFiles([filePath]):
         from gzip import open as gz
         return load(gz(filePath))
@@ -155,7 +156,7 @@ def getFitSize(fitTrackedData):
 def getHeadRevision():
     return popen('git rev-parse HEAD'.split(), stdout=PIPE).communicate()[0].strip()
 
-def readFitFileForRevision(rev):
+def readFitFileForRevision(rev='HEAD'):
     fitData = popen(('git show %s:.fit'%rev).split(), stdout=PIPE, stderr=PIPE).communicate()[0]
     if len(fitData) == 0:
         return {}
@@ -183,3 +184,15 @@ def filterBinaryFiles(files):
             binaryFiles.append(filepath)
 
     return binaryFiles
+
+class DataStore:
+    def __init__(self, progress):
+        pass
+    def check(self, dst):
+        return None
+    def get(self, src, dst, size):
+        return False
+    def put(self, src, dst, size):
+        return False
+    def close(self):
+        pass

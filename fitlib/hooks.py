@@ -1,10 +1,11 @@
-from fit import gitDirOperation, repoDir, savesDir, commitsDir
-from fit import readFitFileForRevision, getHeadRevision
+from fitlib import gitDirOperation, repoDir, savesDir, commitsDir
+from fitlib import readFitFileForRevision, getHeadRevision
 from changes import getStagedOffenders, saveItems, restoreItems
 from merge import getMergedFit
 from subprocess import PIPE, Popen as popen
 from textwrap import fill as wrapline
 from os import remove
+from os.path import join as joinpath, exists
 from shutil import move
 
 # This msg string should be left exactly as it is in the multi-line string

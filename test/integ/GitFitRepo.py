@@ -4,11 +4,8 @@ from os.path import isdir
 from subprocess import call as pcall
 from shutil import rmtree
 from uuid import uuid4 as uid
-
-from sys import path
 from os.path import dirname, realpath, join
-path.append(join(dirname(realpath(__file__)), '..', 'bin'))
-from fit import gitDirOperation
+from fitlib import gitDirOperation
 
 def shell(cmd):
     return pcall('set -e\n' + cmd, shell=True)

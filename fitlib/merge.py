@@ -1,5 +1,5 @@
-from fit import gitDirOperation, repoDir, fitFile, readFitFile, writeFitFile
-from fit import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles
+from fitlib import gitDirOperation, repoDir, fitFile, readFitFile, writeFitFile
+from fitlib import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles
 from os import path, remove
 from shutil import move
 from subprocess import Popen as popen, PIPE
@@ -95,7 +95,6 @@ def resolve(fitTrackedData):
     removed = []
     added = []
     working = []
-    changes = False
 
     other = readFitFile(mergeOtherFitFile)
 
@@ -124,7 +123,6 @@ def resolve(fitTrackedData):
                 removed.append(item)
             else:
                 added.append((item, other[item]))
-            changes = True
         elif resolution == 'W':
             working.append(item)
 
@@ -134,9 +132,7 @@ def resolve(fitTrackedData):
 
     cleanupMergeArtifacts()
 
-    print added[0]
-    print fitTrackedData[added[0][0]]
-    return changes, working
+    return len(added)+len(removed) > 0, working
 
 def cleanupMergeArtifacts():
     if path.exists(mergeMineFitFile):
@@ -150,8 +146,7 @@ def isMergeInProgress():
     if fitFileStatus:
         fitFileStatus = fitFileStatus.split()[0]
     merging = 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
-    merging &= path.exists(fitFile) and fitFile not in filterBinaryFiles([fitFile])
-    merging &= open(fitFile).next().strip() == conflictIntructions[0]
+    merging &= path.exists(fitFile) and fitFile not in filterBinaryFiles([fitFile]) and open(fitFile).next().strip() == conflictIntructions[0]
 
     if not merging:
         cleanupMergeArtifacts()

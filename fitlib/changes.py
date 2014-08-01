@@ -1,11 +1,11 @@
-from fit import fitStats, fitFile, gitDirOperation, repoDir, savesDir
-from fit import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
-from fit import filterBinaryFiles
+from fitlib import fitStats, fitFile, gitDirOperation, repoDir, savesDir
+from fitlib import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
+from fitlib import filterBinaryFiles, readFitFileForRevision
 from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
 from paths import getValidFitPaths
 import merge
 from subprocess import Popen as popen, PIPE
-from os.path import exists, dirname
+from os.path import exists, dirname, join as joinpath
 from os import remove, makedirs, stat, listdir
 from shutil import copyfile
 from itertools import chain
@@ -21,6 +21,7 @@ def printLegend():
     print '-   removed (physically deleted, fit will discontinue tracking it upon commit)'
     print '~   untracked (marked by you to be ignored by fit, fit will discontinue tracking it upon commit)'
     print
+    print 'Commit-aborting staged items in git'
     print 'F  an item fit is already tracking, but is also currently staged for commit in git'
     print 'B  a binary file staged for commit in git that fit has not been told to ignore'
     print '-------------------------------------------------------------------------------'
@@ -89,7 +90,7 @@ def computeHashes(items):
         i += 1
         print progress_fmt%(i*100./numItems, i, numItems),
         stdout.flush()
-    print '\r'+(' '*(45+int(numDigits)*2))+'\r'
+    print '\r'+(' '*(45+int(numDigits)*2))+'\r',
     return hashes
 
 # Returns a dictionary of modified items, mapping filename to (hash, filesize).
@@ -277,23 +278,32 @@ def _restorePopulate(restoreType, objects, fitTrackedData, quiet=False):
 
 @gitDirOperation(repoDir)
 def save(fitTrackedData, quiet=False, pathArgs=None):
+    fitDataChanged = False
     if merge.isMergeInProgress():
         result = merge.resolve(fitTrackedData)
         if not result:
             return
 
-        updateFitFile, paths = result
-        changes = saveItems(fitTrackedData, paths=paths, quiet=True)
+        fitDataChanged, paths = result
+        fitDataChanged |= saveItems(fitTrackedData, paths=paths, quiet=True)
     else:
-        changes = saveItems(fitTrackedData, pathArgs=pathArgs)
+        fitDataChanged = saveItems(fitTrackedData, pathArgs=pathArgs)
 
-    if not (updateFitFile or changes):
-        return
+    if fitDataChanged:
+        writeFitFile(fitTrackedData)
 
-    writeFitFile(fitTrackedData)
-    popen('git add -f'.split()+[fitFile]).wait()
-    if changes and changes[0]:
-        _saveCache(changes[0])
+    fitFileStatus = popen('git status --porcelain -u --ignored .fit'.split(), stdout=PIPE).communicate()[0].strip()
+    if len(fitFileStatus) > 0 and fitFileStatus[1] != ' ':
+        popen('git add -f'.split()+[fitFile]).wait()
+        print 'Staged .fit file.'
+
+    if fitDataChanged:
+        modified,added,removed = merge.fitDiff(readFitFileForRevision(), fitTrackedData)
+        newItems = modified|added
+        if not newItems:
+            return
+
+        _saveCache({i:fitTrackedData[i] for i in newItems})
 
 @gitDirOperation(repoDir)
 def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
@@ -316,7 +326,7 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     for i in untracked:
         del fitTrackedData[i]
 
-    return modified, removed|untracked
+    return True
 
 def _saveCache(newItems):
     for l in listdir(savesDir):
@@ -326,7 +336,7 @@ def _saveCache(newItems):
         remove(savesFile)
 
     fitFileHash = popen('git ls-files -s .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[1]
-    writeSaveFile(newItems, joinpath(savesDir,fitFileHash))
+    writeFitFile(newItems, joinpath(savesDir,fitFileHash))
 
     numNewItems = len(newItems)
     numDigits = str(len(str(numNewItems)+''))
@@ -334,5 +344,5 @@ def _saveCache(newItems):
     def progress(i):
         print progress_fmt%(i*100./numNewItems, i, numNewItems),
         stdout.flush()
-    placeObjects((h,f) for f,(h,s) in newItems.iteritems(), progressCallback=progress)
-    print '\r'+(' '*(43+int(numDigits)*2))+'\r'
+    placeObjects(((h,f) for f,(h,s) in newItems.iteritems()), progressCallback=progress)
+    print '\r'+(' '*(43+int(numDigits)*2))+'\r',

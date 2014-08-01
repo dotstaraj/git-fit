@@ -1,7 +1,7 @@
-from fit import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getHeadRevision
-from fit import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir
+from fitlib import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getHeadRevision
+from fitlib import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir
 from paths import getValidFitPaths
-from subprocess import Popen as popen
+from subprocess import Popen as popen, PIPE
 from os.path import dirname, basename, exists, join as joinpath, getsize
 from os import walk, makedirs, remove, close as osclose
 from shutil import copyfile, move
@@ -9,23 +9,27 @@ from sys import stdout
 from tempfile import mkstemp
 
 _fitstore = None
-def loadstore():
-    global _fitstore
-    import s3store
-    import localstore
-    _fitstore = s3store
+def loadDataStore():
+    moduleName = popen('git config fit.datastore.moduleName'.split(), stdout=PIPE).communicate()[0].strip()
+    modulePath = popen('git config fit.datastore.modulePath'.split(), stdout=PIPE).communicate()[0].strip()
 
-class Store:
-    def __init__(self, progress):
-        pass
-    def check(self, dst):
-        return None
-    def get(self, src, dst, size):
-        return False
-    def put(self, src, dst, size):
-        return False
-    def close(self):
-        pass
+    if not moduleName:
+        print 'error: No external data store is configured. Check the'
+        print '       fit.datastore.module(Name|Path) keys in git config.'
+        exit(1)
+
+    if modulePath:
+        import sys
+        sys.path.append(modulePath)
+
+    try:
+        from importlib import import_module
+        global _fitstore
+        _fitstore = import_module(moduleName)
+    except Exception as e:
+        print 'error: Could not load the data store configured in fit.datastore.'
+        print e
+        exit(1)
 
 @gitDirOperation(repoDir)
 def findObject(obj):
@@ -44,31 +48,21 @@ def placeObjects(objects, progressCallback=lambda x: None):
 
 @gitDirOperation(repoDir)
 def removeObjects(objects):
-    for obj in objects
+    for obj in objects:
         path = joinpath(cacheDir, joinpath(obj[:2], obj[2:]))
         if exists(path):
             remove(path)
 
 @gitDirOperation(repoDir)
 def getUpstreamItems(fitTrackedData, paths):
-    objects = []
-    hashToPathFitData = {fitTrackedData[p][0]:p for p in paths}
-
-    for root, dirs, files in walk(syncDir):
-        for f in files:
-            objPath = joinpath(root,f)
-            o = basename(root)+f
-            if o in hashToPathFitData:
-                objects.append(hashToPathFitData[o])
-    
-    return objects
+    return set(readFitFile(joinpath(commitsDir, getHeadRevision())))
 
 @gitDirOperation(repoDir)
 def getDownstreamItems(fitTrackedData, paths, stats):
     return [p for p in paths if p in stats and stats[p][0] == 0 and not findObject(fitTrackedData[p][0])]
 
 def getCacheSize(lru):
-    return sum([sum([o for o in e]) for e in lru])
+    return sum([sum([o[1] for o in e]) for e in lru])
 
 class _ProgressPrinter:
     def __init__(self):
@@ -123,9 +117,7 @@ class _QuietProgressPrinter:
     def setTotalSize(self, totalSize):
         pass
 
-def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=False):
-    global _fitstore
-    
+def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=False):    
     allItems = fitTrackedData.keys()
     validPaths = getValidFitPaths(pathArgs, allItems, repoDir) if pathArgs else allItems
     if len(fitTrackedData) == 0 or len(validPaths) == 0:
@@ -167,6 +159,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
         print 'Run \'git-fit get -l\' to list these items.'
     else:
         try:
+            loadDataStore()
             store = _fitstore.Store(pp.updateProgress)
         except Exception as e:
             print e
@@ -203,6 +196,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
 
         pp.done()
         store.close()
+        print
         updateCacheFile(objects, fitTrackedData)
 
         if len(errors) > 0:
@@ -212,9 +206,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
 
     refreshStats(touched)
 
-def put(fitTrackedData, summary=False,  showlist=False, quiet=False):
-    global _fitstore
-    
+def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=False, quiet=False):
     if len(fitTrackedData) == 0:
         return
 
@@ -246,6 +238,7 @@ def put(fitTrackedData, summary=False,  showlist=False, quiet=False):
         print 'Run \'git-fit put -l\' to list these items.'
     else:
         try:
+            loadDataStore()
             store = _fitstore.Store(pp.updateProgress if not quiet else lambda a,b:None)
         except Exception as e:
             print e
@@ -280,6 +273,7 @@ def put(fitTrackedData, summary=False,  showlist=False, quiet=False):
 
         pp.done()
         store.close()
+        print
         updateCacheFile(objects, fitTrackedData)
         if len(commitsFitData) > 0:
             writeFitFile(commitsFitData, commitsFile)
@@ -302,7 +296,7 @@ def updateCacheFile(objects, fitTrackedData):
         print 'Cache size (%.2fMB) is larger than twice the tracked size (%.2fMB).'%(cacheSize/1048576., fitSize/1048576.)
         print '\tPruning will occur.'
     else:
-        print 'Cache size is (%.2fMB) and tracked size is (%.2fMB).'%(cacheSize/1048576., fitSize/1048576.)
+        print 'Cache size is %.2fMB and tracked size is %.2fMB (will not prune at this time).'%(cacheSize/1048576., fitSize/1048576.)
 
     # objects being added to this commit might already exist
     # in cache as part of other commit, so for each lru entry,

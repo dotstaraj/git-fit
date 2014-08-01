@@ -3,14 +3,11 @@
 from argparse import ArgumentParser
 from os import mkdir, chmod
 from os.path import dirname, realpath, join as joinpath, exists
-import sys
-sys.path.append(joinpath(dirname(realpath(__file__)), 'bin'))
-sys.path.append(joinpath(dirname(realpath(__file__)), 'stores'))
 from sys import argv
 from subprocess import call
-from fit import fitDir, cacheDir, repoDir, gitDir, tempDir, commitsDir, savesDir
-from fit import mergeMineFitFile, readFitFile, firstTimeFile, printAsText
-import hooks, objects, merge, changes
+from fitlib import fitDir, cacheDir, repoDir, gitDir, tempDir, commitsDir, savesDir
+from fitlib import mergeMineFitFile, readFitFile, firstTimeFile, printAsText
+from fitlib import hooks, objects, merge, changes
 import stat
 
 def main():
@@ -30,7 +27,6 @@ def main():
             getattr(changes, argv[1])(fitTrackedData, pathArgs=opts.paths)
             exit()
         elif argv[1] in ('get', 'put'):
-            objects.loadstore()
             kwd_args = {'summary':opts.summary, 'showlist':opts.list, 'quiet':opts.quiet}
             if argv[1] == 'get':
                 kwd_args['pathArgs'] = opts.paths
@@ -48,9 +44,9 @@ def main():
         hooks.postCheckout(fitTrackedData, 'HEAD@{1}')
     elif opts.git == 'post-checkout' and opts.paths[2] == '1' and opts.paths[0] != opts.paths[1]:
         hooks.postCheckout(fitTrackedData, opts.paths[0])
-    elif opts.git == 'merge_driver':
+    elif opts.git == 'merge-driver':
         merge.mergeDriver(*(opts.paths[:3]))
-    elif opts.git == 'text_output':
+    elif opts.git == 'text-output':
         printAsText(readFitFile(opts.paths[0]))
 
 # This will be used to check whether we need to run (or re-run after changes to git-fit)
@@ -174,7 +170,12 @@ helpIntro='''
 git-fit has five basic operations, status, save/restore, and get/put. All
 operations except 'put' can optionally take one or more paths to select a
 subset of items. Use -h/--help to get brief/detailed help on any operation.
-Without any subcommand, git-fit shows the status of fit items.
+Without any subcommand, git-fit shows the status of fit items in the working
+tree. This working tree status is always relative to the information recorded
+in the current working tree .fit file. However, a diff of changes between any
+two versions of the .fit file (i.e. HEAD, index, different branch, older
+revision, etc.) can be viewed by using the usual diff-basedd git commands,
+such as git-diff and git-show.
 '''
 
 helpUsage='''
@@ -185,7 +186,7 @@ Usage:
     git-fit save    [<PATH>...]
     git-fit restore [<PATH>...]
     git-fit get     [--summary] [--list] [--quiet] [<PATH>...]
-    git-fit put     [--summary] [--list] [--quiet] [--force <PATH>...]
+    git-fit put     [--summary] [--list] [--quiet]
 '''
 
 cmdGetPutOpts='''
@@ -234,10 +235,11 @@ restore. Items marked to be untracked from fit (~) and any potential commit-abor
 continue to be shown and cannot be "restored".
 '''
 cmdGetHelp = '''
-Copies objects FROM remote location and/or populates working tree. Until this is done, any
-action in your project that requires the actual contents of these items will not work as
-expected. Only items that are not already in the working tree or local fit cache will be
-downloaded.
+Copies objects FROM remote location and/or populates working tree from local cache. Until this
+is done, any action in your project that requires the actual contents of these items will not
+work as expected. Only items that are not already in the working tree or local fit cache will
+be downloaded. If there are changes to fit items in the working tree, git-fit get does not 
+affect them.
 '''
 cmdPutHelp = '''
 Copies objects TO remote location from local cache. Until this is done, people who are using
