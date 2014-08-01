@@ -20,6 +20,7 @@ if _p.returncode != 0:
 
 # Get some more directory/file paths we're interested in
 selfDir = path.dirname(path.realpath(__file__))
+workingDir = getcwd()
 gitDir = popen('git rev-parse --git-dir'.split(), stdout=PIPE).communicate()[0].strip()
 fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')

@@ -1,5 +1,5 @@
 
-from . import fitStats, fitFile, gitDirOperation, repoDir, savesDir
+from . import fitStats, fitFile, gitDirOperation, repoDir, savesDir, workingDir
 from . import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
 from . import filterBinaryFiles, readFitFileForRevision
 from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
@@ -32,18 +32,16 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     if legend:
         printLegend()
 
-    modified, added, removed, untracked, unchanged, stats = getChangedItems(fitTrackedData, pathArgs=pathArgs)
+    trackedItems = getTrackedItems()
+    allItems = set(fitTrackedData) | trackedItems
+    paths = None if not pathArgs else getValidFitPaths(pathArgs, allItems, basePath=repoDir, workingDir=workingDir)
+
+    modified, added, removed, untracked, unchanged, stats = getChangedItems(fitTrackedData, trackedItems=trackedItems, paths=paths)
     conflict, binary = getStagedOffenders()
-    unchanged = unchanged if showall else []
-
-    toupload = set()
-    todownload = set()
-
-    paths = fitTrackedData if not pathArgs else getValidFitPaths(pathArgs, set(fitTrackedData), repoDir)
-    toupload = getUpstreamItems(fitTrackedData, paths)
-    todownload = getDownstreamItems(fitTrackedData, paths, stats)
-
     offenders = set(chain(conflict, binary))
+    unchanged = unchanged if showall else []
+    downstream = getDownstreamItems(fitTrackedData, allItems if paths == None else paths, stats)
+    upstream = getUpstreamItems()
 
     modified =  [('*  ', i) for i in set(modified)-offenders]
     added =     [('+  ', i) for i in added-offenders]
@@ -53,7 +51,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
     binary =    [('B  ', i) for i in binary]
     unchanged = [('   ', i) for i in unchanged]
 
-    if all(len(l) == 0 for l in [added,removed,untracked,modified,conflict,binary,toupload,todownload,unchanged]):
+    if all(len(l) == 0 for l in [added,removed,untracked,modified,conflict,binary,upstream,downstream,unchanged]):
         print 'Nothing to show (no problems or changes detected).'
         return
 
@@ -63,10 +61,10 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
             print '  ', c, f
         print
 
-    if len(toupload) > 0:
-        print ' * %s object(s) may need to be uploaded. Run \'git-fit put\' -s for details.'%len(toupload)
-    if len(todownload) > 0:
-        print ' * %d object(s) need to be downloaded. Run \'git-fit get\' -s for details.'%len(todownload)
+    if len(upstream) > 0:
+        print ' * %s object(s) may need to be uploaded. Run \'git-fit put\' -s for details.'%len(upstream)
+    if len(downstream) > 0:
+        print ' * %d object(s) need to be downloaded. Run \'git-fit get\' -s for details.'%len(downstream)
 
 def _gitHashInputProducer(stream, items):
     for j in items:
@@ -150,25 +148,28 @@ def getModifiedItems(existingItems, fitTrackedData):
     return modifiedItems
 
 @gitDirOperation(repoDir)
-def getChangedItems(fitTrackedData, paths=None, pathArgs=None):
-
-    # The tracked items according to the saved/committed .fit file
-    expectedItems = set(fitTrackedData)
-
-    # The tracked items in the working directory according to the
+def getTrackedItems():
+    # The tracked items in the working tree according to the
     # currently set fit attributes
     fitSetRgx = re.compile('(.*): fit: set')
     p = popen('git ls-files -o'.split(), stdout=PIPE)
     p = popen('git check-attr --stdin fit'.split(), stdin=p.stdout, stdout=PIPE)
-    trackedItems = {m.group(1) for m in [fitSetRgx.match(l) for l in p.stdout] if m}
+    return {m.group(1) for m in [fitSetRgx.match(l) for l in p.stdout] if m}
+
+@gitDirOperation(repoDir)
+def getChangedItems(fitTrackedData, trackedItems=None, paths=None, pathArgs=None):
+
+    # The tracked items according to the saved/committed .fit file
+    expectedItems = set(fitTrackedData)
+    trackedItems = trackedItems or getTrackedItems()
 
     # Get valid, fit-friendly repo paths from given arbitrary path arguments
-    if not paths and pathArgs:
-        paths = getValidFitPaths(pathArgs, expectedItems | trackedItems, repoDir)
-        if not paths:
-            return ({}, set(), set(), set(), set(), {})
+    if paths == None and pathArgs:
+        paths = getValidFitPaths(pathArgs, expectedItems | trackedItems, basePath=repoDir, workingDir=workingDir)
 
-    if paths:
+    if paths != None:
+        if len(paths) == 0:
+            return ({}, set(), set(), set(), set(), {})
         expectedItems &= paths
         trackedItems &= paths
 
@@ -230,7 +231,8 @@ def restore(fitTrackedData, quiet=False, pathArgs=None):
         return
 
     modified, added, removed, untracked = changes
-    if restoreItems(fitTrackedData, modified, added, removed, quiet=quiet) > 0 and not quiet:
+    missing = restoreItems(fitTrackedData, modified, added, removed, quiet=quiet)
+    if missing > 0 and not quiet:
         print '\nFor %d of the fit objects just restored, only empty stub files were created in their'%missing
         print 'stead. This is because those objects are not cached and must be downloaded. To start'
         print 'this download, run \'git-fit get\' with the same path arguments passed to'

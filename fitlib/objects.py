@@ -48,11 +48,9 @@ def removeObjects(objects):
         if exists(path):
             remove(path)
 
-@gitDirOperation(repoDir)
-def getUpstreamItems(fitTrackedData, paths):
+def getUpstreamItems():
     return set(readFitFile(getCommitFile()))
 
-@gitDirOperation(repoDir)
 def getDownstreamItems(fitTrackedData, paths, stats):
     return [p for p in paths if p in stats and stats[p][0] == 0 and not findObject(fitTrackedData[p][0])]
 
@@ -112,6 +110,7 @@ class _QuietProgressPrinter:
     def setTotalSize(self, totalSize):
         pass
 
+@gitDirOperation(repoDir)
 def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=False):    
     allItems = fitTrackedData.keys()
     validPaths = getValidFitPaths(pathArgs, allItems, repoDir) if pathArgs else allItems
@@ -184,6 +183,7 @@ def _get(items, store, pp, successes, failures):
             pp.updateProgress(size, size, custom_item_string='ERROR')
             failures.append(filePath)
 
+@gitDirOperation(repoDir)
 def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=False, quiet=False):
     commitsFile = getCommitFile()
     commitsFitData = readFitFile(commitsFile)

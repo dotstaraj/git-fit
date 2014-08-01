@@ -1,6 +1,6 @@
 #!/usr/bin/env python2.7
 
-from os.path import dirname, realpath, relpath
+from os.path import dirname, realpath, relpath, join as joinpath
 
 class FitNode:
     def __init__(self, path, nodes):
@@ -53,24 +53,20 @@ def _addFitItemsToList(path, node, items):
     while len(nodes) > 0:
         node = nodes.pop(0)
         if len(node.children) == 0:
-            items.append(node.parentPath)
+            items.add(node.parentPath)
         else:
             nodes.extend([FitNode(node.parentPath + '/' + k, v) for k,v in node.children.iteritems()])            
 
-def getValidFitPaths(given, available, basePath=''):
+def getValidFitPaths(given, available, basePath='', workingDir=''):
     if not given:
         return None
 
     # Normalize the user-entered paths into canonical paths relative to basePath
-    given = {relpath(realpath(p), basePath) for p in given}
-
-    if '.' in given:
-        return available        
-
+    given = {relpath(realpath(joinpath(workingDir,p)), basePath) for p in given}
+    validPaths = set(available) if '.' in given else set()
     fitPathTree = getPathTree(available)
 
     # Generate list of individual fit items under user-given paths
-    validPaths = []
     for p in given:
         if p.startswith('../'):
             print '(...skipping path not under repo: %s)'%p
