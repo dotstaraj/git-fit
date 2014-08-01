@@ -32,7 +32,9 @@ def postCheckout(mergeOld, mergeNew):
 
 @gitDirOperation(repoDir)
 def postCommit(fitTrackedData):
-    fitFileHash = popen('git ls-tree HEAD .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[2]
+    fitFileHash = popen('git ls-tree HEAD .fit'.split(), stdout=PIPE).communicate()[0].strip()
+    if fitFileHash:
+        fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
     if exists(savesFile):
         move(savesFile, joinpath(commitsDir, getHeadRevision()))

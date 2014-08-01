@@ -13,34 +13,29 @@ import stat
 
 def main():
     opts = getOpts()
+    firstTimeRepoSetup(opts.no_hooks)
+    doingMerge = merge.isMergeInProgress()
 
-    if merge.isMergeInProgress():
+    if doingMerge:
         if len(argv) != 2 or argv[1] != 'save':
             print merge.conflictMsg
             return
 
-        fitTrackedData = readFitFile(mergeMineFitFile)
-    else:
-        fitTrackedData = readFitFile()
-
-    if len(argv) > 1:
-        if argv[1] in ('save', 'restore'):
-            getattr(changes, argv[1])(fitTrackedData, pathArgs=opts.paths)
-            exit()
-        elif argv[1] in ('get', 'put'):
-            kwd_args = {'summary':opts.summary, 'showlist':opts.list, 'quiet':opts.quiet}
-            if argv[1] == 'get':
-                kwd_args['pathArgs'] = opts.paths
-            getattr(objects, argv[1])(fitTrackedData, **kwd_args)
-            exit()
-
-    firstTimeRepoSetup(fitTrackedData, opts.no_hooks)
-    if not opts.git:
-        changes.printStatus(fitTrackedData, pathArgs=opts.paths, legend=opts.legend, showall=opts.all)
+    if len(argv) > 1 and argv[1] in ('save', 'restore', 'get', 'put'):
+        if argv[1] == 'save':
+            changes.save(readFitFile(mergeMineFitFile if doingMerge else None), pathArgs=opts.paths)
+        elif argv[1] == 'restore':
+            changes.restore(readFitFile(), pathArgs=opts.paths)
+        elif argv[1] == 'get':
+            objects.get(readFitFileForRevision(), pathArgs=opts.paths, summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
+        elif argv[1] ==  'put':
+            objects.put(readFitFileForRevision(), summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
+    elif not opts.git:
+        changes.printStatus(readFitFile(), pathArgs=opts.paths, legend=opts.legend, showall=opts.all)
     elif opts.git == 'pre-commit':
-        hooks.preCommit(fitTrackedData)
+        hooks.preCommit(readFitFile())
     elif opts.git == 'post-commit':
-        hooks.postCommit(fitTrackedData)
+        hooks.postCommit(readFitFile())
     elif opts.git_head_change:
         autoMergeRestore = (
                 opts.git == 'post-merge'
@@ -49,6 +44,7 @@ def main():
             ) and fitFileDiffFromRevision()
 
         if autoMergeRestore:
+            fitTrackedData = readFitFile()
             lastFitTrackedData = readFitFileForRevision('HEAD@{1}')
             if fitTrackedData != lastFitTrackedData:
                 hooks.postCheckout(fitTrackedData, lastFitTrackedData)
@@ -61,7 +57,7 @@ def main():
 # this first-time repo setup
 _firstTimeCounter = 0
 
-def firstTimeRepoSetup(fitTrackedData, nohooks=False):
+def firstTimeRepoSetup(nohooks=False):
     global _firstTimeCounter
     if not exists(fitDir):
         print 'Preparing this repository for use with git-fit...'
@@ -70,7 +66,9 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
         mkdir(commitsDir)
         mkdir(savesDir)
         mkdir(tempDir)
-        changes.restore(fitTrackedData, quiet=True)
+        
+        print 'Restoring working tree with current fit items...'
+        changes.restore(readFitFile(), quiet=True)
     elif exists(firstTimeFile):
         firstTimeCount = int(open(firstTimeFile).read())
 
@@ -119,6 +117,8 @@ def firstTimeRepoSetup(fitTrackedData, nohooks=False):
     call('set -e\n' + cmd, shell=True)
 
 def getOpts():
+    parser = None
+    args = None
     if len(argv) == 1 or argv[1] not in ('save', 'restore', 'get', 'put'):
         if '-h' in argv:
             print helpUsage
@@ -128,13 +128,11 @@ def getOpts():
             print helpIntro + helpUsage + helpFull
             exit()
         parser = ArgumentParser(add_help=False, usage='git-fit [--help] [--legend] [--all] [<PATH>...]')
-        parser.add_argument('--no-hooks', action='store_true')
         parser.add_argument('--git-head-change', action='store_true')
         parser.add_argument('--git', choices=('post-commit','pre-commit','post-checkout','post-merge','post-rewrite','merge-driver','text-output'))
         parser.add_argument('--all', '-a', action='store_true')
         parser.add_argument('--legend', '-l', action='store_true')
         parser.add_argument('paths', nargs='*')
-        opts = parser.parse_args()
     elif argv[1] in ('save', 'restore'):
         usage = 'git-fit %s [--help] [<PATH>...]'%(argv[1])
         if '--help' in argv[2:]:
@@ -146,7 +144,7 @@ def getOpts():
             exit()
         parser = ArgumentParser(add_help=False, usage=usage)
         parser.add_argument('paths', nargs='*')
-        opts = parser.parse_args(argv[2:])
+        args = argv[2:]
     elif argv[1] in ('get', 'put'):
         usage = 'git-fit %s [--help] %s'%(argv[1], cmdGetUsage if argv[1] == 'get' else cmdPutUsage)
         if '--help' in argv[2:]:
@@ -163,9 +161,10 @@ def getOpts():
         parser.add_argument('--quiet', '-q', action='store_true')
         if argv[1] == 'get':
             parser.add_argument('paths', nargs='*')
-        opts = parser.parse_args(argv[2:])
+        args = argv[2:]
 
-    return opts
+    parser.add_argument('--no-hooks', action='store_true')
+    return parser.parse_args(args)
 
 helpIntro='''
 git-fit has five basic operations, status, save/restore, and get/put. All

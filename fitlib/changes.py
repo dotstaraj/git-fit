@@ -41,7 +41,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False):
 
     paths = fitTrackedData if not pathArgs else getValidFitPaths(pathArgs, set(fitTrackedData), repoDir)
     toupload = getUpstreamItems(fitTrackedData, paths)
-    todownload = getDownstreamItems(fitTrackedData, stats, paths)
+    todownload = getDownstreamItems(fitTrackedData, paths, stats)
 
     offenders = set(chain(conflict, binary))
 

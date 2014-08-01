@@ -5,6 +5,13 @@ from json import load, dump
 from paths import fitMapToTree, fitTreeToMap
 import re
 
+# Below two lines prevents Python raising an exception
+# when piping output to commands like less, head that
+# can prematurely terminate the pipe
+# https://mail.python.org/pipermail/python-list/2004-June/273297.html
+import signal
+signal.signal(signal.SIGPIPE, signal.SIG_DFL) 
+
 # Get the repo root directory if inside one, otherwise exit
 _p = popen('git rev-parse --show-toplevel'.split(), stdout=PIPE)
 repoDir = _p.communicate()[0].strip()

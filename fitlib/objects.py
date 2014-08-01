@@ -148,50 +148,41 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
         print '%.2fMB in total can be downloaded'%(totalSize/1048576)
         print 'Run \'git-fit get -l\' to list these items.'
     else:
-        pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
-        pp.setTotalSize(totalSize)
-        store = getDataStore(pp.updateProgress)
-        errors = []
-        objects = []
-        needed.sort()
-        if not exists(tempDir):
-            popen(['mkdir', '-p', tempDir]).wait()
-        for filePath,key,objHash,objPath,size in needed:
-            pp.newItem(filePath, size)
-            
-            # Copy download to temp file first, and then to actual object location
-            # This is to prevent interrupted downloads from causing bad objects to be placed
-            # in the objects cache
-            (tempHandle, tempTransferFile) = mkstemp(dir=tempDir)
-            osclose(tempHandle)
-            key = store.check(key)
+        successes = []
+        _transfer(_get, needed, totalSize, fitTrackedData, successes)
 
-            try:
-                transferred = store.get(key, tempTransferFile, size)
-            except:
-                transferred = False
-            if key and transferred:
-                pp.updateProgress(size, size)
-                popen(['mkdir', '-p', dirname(objPath)]).wait()
-                popen(['mv', tempTransferFile, objPath]).wait()
-                popen(['cp', objPath, filePath]).wait()
-                touched[filePath] = objHash
-                objects.append((objHash, size))
-            else:
-                pp.updateProgress(size, size, custom_item_string='ERROR')
-                errors.append(filePath)
-
-        pp.done()
-        store.close()
-        print
-        updateCacheFile(objects, fitTrackedData)
-
-        if len(errors) > 0:
-            print 'Some items could not be transferred:'
-            print '\n'.join(errors)
-            print 'Above items could not be transferred:'
+        for filePath, objHash, size in successes:
+            touched[filePath] = objHash
 
     refreshStats(touched)
+
+def _get(items, store, pp, successes, failures):
+    if not exists(tempDir):
+        popen(['mkdir', '-p', tempDir]).wait()
+
+    for filePath,key,objHash,objPath,size in items:
+        pp.newItem(filePath, size)
+        
+        # Copy download to temp file first, and then to actual object location
+        # This is to prevent interrupted downloads from causing bad objects to be placed
+        # in the objects cache
+        (tempHandle, tempTransferFile) = mkstemp(dir=tempDir)
+        osclose(tempHandle)
+        key = store.check(key)
+
+        try:
+            transferred = store.get(key, tempTransferFile, size)
+        except:
+            transferred = False
+        if key and transferred:
+            pp.updateProgress(size, size)
+            popen(['mkdir', '-p', dirname(objPath)]).wait()
+            popen(['mv', tempTransferFile, objPath]).wait()
+            popen(['cp', objPath, filePath]).wait()
+            successes.append((filePath, objHash, size))
+        else:
+            pp.updateProgress(size, size, custom_item_string='ERROR')
+            failures.append(filePath)
 
 def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=False, quiet=False):
     commitsFile = getCommitFile()
@@ -218,55 +209,65 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
         print '%.2fMB maximum possible transfer size'%(totalSize/1048576)
         print 'Run \'git-fit put -l\' to list these items.'
     else:
-        pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
-        pp.setTotalSize(totalSize)
-        store = getDataStore(pp.updateProgress)
-        errors = []
-        objects = []
-        available.sort()
-        for filePath,keyName,objHash,objPath,size in available:
-            pp.newItem(filePath, size)
-            if not exists(objPath):
-                pp.updateProgress(size, size, custom_item_string='ERROR')
-                errors.append(filePath)
-                continue
+        successes = []
+        _transfer(_put, available, totalSize, fitTrackedData, successes)
 
-            done = True
-            if store.check(keyName):
-                pp.updateProgress(size, size, custom_item_string='NO TRANSFER NEEDED')
-            else:
-                try:
-                    transferred = store.put(objPath, keyName, size)
-                except:
-                    transferred = False
-                if transferred:
-                    pp.updateProgress(size, size)
-                else:
-                    done = False
-                    pp.updateProgress(size, size, custom_item_string='ERROR')
-                    errors.append(filePath)
-            if done:
-                del commitsFitData[filePath]
-                objects.append((objHash, size))
+        for filePath, objHash, size in successes:
+            del commitsFitData[filePath]
 
-        pp.done()
-        store.close()
-        print
-        updateCacheFile(objects, fitTrackedData)
-        if len(commitsFitData) > 0:
-            writeFitFile(commitsFitData, commitsFile)
+    if len(commitsFitData) > 0:
+        writeFitFile(commitsFitData, commitsFile)
+    elif exists(commitsFile):
+        remove(commitsFile)
+
+def _put(items, store, pp, successes, failures):
+    for filePath,keyName,objHash,objPath,size in items:
+        pp.newItem(filePath, size)
+        if not exists(objPath):
+            pp.updateProgress(size, size, custom_item_string='ERROR')
+            failures.append(filePath)
+            continue
+
+        done = True
+        if store.check(keyName):
+            pp.updateProgress(size, size, custom_item_string='NO TRANSFER NEEDED')
         else:
-            remove(commitsFile)
+            try:
+                transferred = store.put(objPath, keyName, size)
+            except:
+                transferred = False
+            if transferred:
+                pp.updateProgress(size, size)
+            else:
+                done = False
+                pp.updateProgress(size, size, custom_item_string='ERROR')
+                failures.append(filePath)
+        if done:
+            successes.append((filePath, objHash, size))
 
-        if len(errors) > 0:
-            print '\nSome items could not be transferred:'
-            print '\n'.join(errors)
-            print '\nAbove items could not be transferred:'
+def _transfer(method, items, size, fitTrackedData, successes):
+    pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
+    pp.setTotalSize(size)
+    store = getDataStore(pp.updateProgress)
+    failures = []
+    items.sort()
 
-def updateCacheFile(objects, fitTrackedData):
+    method(items, store, pp, successes, failures)
+
+    pp.done()
+    store.close()
+    print
+    updateCache(successes, fitTrackedData)
+
+    if len(failures) > 0:
+        print 'Some items could not be transferred:'
+        print '\n'.join(failures)
+        print 'Above items could not be transferred:'
+
+def updateCache(objects, fitTrackedData):
     lru = readCacheFile()
     # lru is a queue, so append most recent to end of list
-    lru.append(objects)
+    lru.append([(h,s) for f,h,s in objects])
 
     fitSize = getFitSize(fitTrackedData)
     cacheSize = getCacheSize(lru)

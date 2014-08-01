@@ -27,13 +27,13 @@ class GitFitRepo:
 
     @gitDirOperation
     def add(self, path=None, binary=False, stage=True):
-        if path == None:
-            path = str(uid())
+        itemId = str(uid())
+        path = path or itemId
 
         if binary:
-            content = r'\0binary file'
+            content = r'\0binary file ' + itemId
         else:
-            content = 'text file'
+            content = 'text file ' + itemId
 
         opts = {'path': path, 'content': content}
 
