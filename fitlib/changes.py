@@ -1,6 +1,7 @@
-from fitlib import fitStats, fitFile, gitDirOperation, repoDir, savesDir
-from fitlib import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
-from fitlib import filterBinaryFiles, readFitFileForRevision
+
+from . import fitStats, fitFile, gitDirOperation, repoDir, savesDir
+from . import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
+from . import filterBinaryFiles, readFitFileForRevision
 from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
 from paths import getValidFitPaths
 import merge

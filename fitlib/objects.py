@@ -1,5 +1,5 @@
-from fitlib import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getHeadRevision
-from fitlib import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir
+from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getHeadRevision
+from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir
 from paths import getValidFitPaths
 from subprocess import Popen as popen, PIPE
 from os.path import dirname, basename, exists, join as joinpath, getsize

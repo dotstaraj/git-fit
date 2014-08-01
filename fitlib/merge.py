@@ -1,5 +1,5 @@
-from fitlib import gitDirOperation, repoDir, fitFile, readFitFile, writeFitFile
-from fitlib import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles
+from . import gitDirOperation, repoDir, fitFile, readFitFile, writeFitFile
+from . import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles
 from os import path, remove
 from shutil import move
 from subprocess import Popen as popen, PIPE

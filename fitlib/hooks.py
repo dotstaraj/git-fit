@@ -1,5 +1,5 @@
-from fitlib import gitDirOperation, repoDir, savesDir, commitsDir
-from fitlib import readFitFileForRevision, getHeadRevision
+from . import gitDirOperation, repoDir, savesDir, commitsDir
+from . import readFitFileForRevision, getHeadRevision
 from changes import getStagedOffenders, saveItems, restoreItems
 from merge import getMergedFit
 from subprocess import PIPE, Popen as popen
