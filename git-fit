@@ -223,6 +223,14 @@ running this command, any items that were shown as modified, added, removed, or 
 (*, +, -, ~) by the status output of git-fit will no longer be shown as such, since those
 changes will have been saved in the .fit file. However, any potential commit-aborting items
 will continue to be shown in the status.
+
+The IMPORTANT thing to remember is that the .fit file should NEVER be manually changed or
+manually git-add'ed. Both the updating/changing of the .fit file and it's staging to the
+git index should be done completely through the git-fit save command. It is, however,
+completely safe to git-reset the .fit file (i.e. unstage it) after it has been
+git-fit save'd. It is also okay to do multiple git-fit save's, one after another, without
+actually having git-commit'ed an existing staged/saved .fit file.
+
 '''
 cmdRestoreHelp = '''
 Discards any changes to fit items in the working tree. (THIS CANNOT BE UNDONE). Notice that

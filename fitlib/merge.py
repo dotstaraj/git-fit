@@ -132,7 +132,7 @@ def resolve(fitTrackedData):
 
     cleanupMergeArtifacts()
 
-    return len(added)+len(removed) > 0, working
+    return working
 
 def cleanupMergeArtifacts():
     if path.exists(mergeMineFitFile):

@@ -1,7 +1,7 @@
 
 from . import fitStats, fitFile, gitDirOperation, repoDir, savesDir, workingDir
 from . import readStatFile, writeStatFile, refreshStats, writeFitFile, readFitFile
-from . import filterBinaryFiles, readFitFileForRevision
+from . import filterBinaryFiles, getStagedFitFileHash, getFitFileStatus
 from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
 from paths import getValidFitPaths
 import merge
@@ -282,31 +282,36 @@ def _restorePopulate(restoreType, objects, fitTrackedData, quiet=False):
 @gitDirOperation(repoDir)
 def save(fitTrackedData, quiet=False, pathArgs=None):
     fitDataChanged = False
+    changes = None
     if merge.isMergeInProgress():
-        result = merge.resolve(fitTrackedData)
-        if not result:
+        workingTreeSelections = merge.resolve(fitTrackedData)
+        if workingTreeSelections == None:
             return
 
-        fitDataChanged, paths = result
-        fitDataChanged |= saveItems(fitTrackedData, paths=paths, quiet=True)
+        if workingTreeSelections:
+            changes = saveItems(fitTrackedData, paths=workingTreeSelections, quiet=True)
+        writeFitFile(fitTrackedData)
     else:
-        fitDataChanged = saveItems(fitTrackedData, pathArgs=pathArgs)
+        changes = saveItems(fitTrackedData, pathArgs=pathArgs)
+        fitDataChanged = sum(len(c) for c in changes) > 0
 
     if fitDataChanged:
         writeFitFile(fitTrackedData)
 
-    fitFileStatus = popen('git status --porcelain -u --ignored .fit'.split(), stdout=PIPE).communicate()[0].strip()
-    if len(fitFileStatus) > 0 and fitFileStatus[1] != ' ':
-        popen('git add -f'.split()+[fitFile]).wait()
-        print 'Staged .fit file.'
+    fitFileStatus = getFitFileStatus()
+    if len(fitFileStatus) == 0 or fitFileStatus[1] == ' ':
+        return
 
-    if fitDataChanged:
-        modified,added,removed = merge.fitDiff(readFitFileForRevision(), fitTrackedData)
-        newItems = modified|added
-        if not newItems:
-            return
+    oldStagedFitFileHash = None
+    newStagedFitFileHash = None
+    if fitFileStatus[0] == 'A':
+        oldStagedFitFileHash = getStagedFitFileHash()
+    popen('git add -f'.split()+[fitFile]).wait()
+    newStagedFitFileHash = getStagedFitFileHash()
+    print 'Staged .fit file.'
 
-        _saveCache({i:fitTrackedData[i] for i in newItems})
+    if changes and changes[0]:
+        _saveCache(changes[0], fitTrackedData, oldStagedFitFileHash, newStagedFitFileHash)
 
 @gitDirOperation(repoDir)
 def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
@@ -314,32 +319,31 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     if not changes:
         if not quiet:
             print 'Nothing to save (no changes detected).'
-        return False
+        return
     
     modified, added, removed, untracked = changes
 
     sizes = [s.st_size for s in [stat(f) for f in added]]
     newHashes = computeHashes(list(added))
     added = zip(added, zip(newHashes, sizes))
-    modified.update(added)
 
-    fitTrackedData.update(modified)
+    added.update(modified)
+    removed |= untracked
+
+    fitTrackedData.update(added)
     for i in removed:
         del fitTrackedData[i]
-    for i in untracked:
-        del fitTrackedData[i]
 
-    return True
+    return added,removed
 
-def _saveCache(newItems):
+def _saveCache(newItems, fitTrackedData, oldStagedFitFileHash, newStagedFitFileHash):
     for l in listdir(savesDir):
         savesFile = joinpath(savesDir, l)
         oldSaveItems = readFitFile(savesFile)
         removeObjects(h for f,(h,s) in oldSaveItems.iteritems() if f not in newItems)
         remove(savesFile)
 
-    fitFileHash = popen('git ls-files -s .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[1]
-    writeFitFile(newItems, joinpath(savesDir,fitFileHash))
+    writeFitFile(newItems, joinpath(savesDir,newStagedFitFileHash))
 
     numNewItems = len(newItems)
     numDigits = str(len(str(numNewItems)+''))

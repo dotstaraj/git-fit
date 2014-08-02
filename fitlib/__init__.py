@@ -168,11 +168,17 @@ def getHeadRevision():
     return popen('git rev-parse HEAD'.split(), stdout=PIPE).communicate()[0].strip()
 
 def fitFileDiffFromRevision(rev='HEAD@{1}'):
-    stdout, stderr = popen(('git diff --name-only %s -- .fit'%rev).split(), stdout=PIPE).communicate()
+    stdout, stderr = popen(('git diff --name-only %s -- %s'%(rev,fitFile)).split(), stdout=PIPE).communicate()
     return stdout.strip() != '' and stderr.strip() == ''
 
+def getStagedFitFileHash():
+    return popen(('git ls-files -s %s'%fitFile).split(), stdout=PIPE).communicate()[0].strip().split()[1]
+
+def getFitFileStatus():
+    return popen(('git status --porcelain -u --ignored %s'%fitFile).split(), stdout=PIPE).communicate()[0].strip()
+
 def readFitFileForRevision(rev='HEAD'):
-    fitData = popen(('git show %s:.fit'%rev).split(), stdout=PIPE, stderr=PIPE).communicate()[0]
+    fitData = popen(('git show %s:%s'%(rev,fitFile)).split(), stdout=PIPE, stderr=PIPE).communicate()[0]
     if len(fitData) == 0:
         return {}
 
