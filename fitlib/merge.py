@@ -54,7 +54,7 @@ conflictIntructions = '''\
 _conflictLine_re = re.compile('\s*\[([MOW]?)\]\s+(\*\*|\+\+|\*-|-\*)\s+(.+)\s*$')
 
 def mergeDriver(common, mine, other):
-    mergedFit, conflicts, modified, added, removed = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
+    mergedFit, modified, added, removed, conflicts = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
 
     if not conflicts:
         writeFitFile(mergedFit, mine)
@@ -62,7 +62,7 @@ def mergeDriver(common, mine, other):
 
     writeFitFile(mergedFit, mergeMineFitFile)
     move(other, mergeOtherFitFile)
-    prepareResolutionForm(conflicts)
+    prepareResolutionForm(conflicts, mine)
     print conflictMsg
     exit(1)
 
@@ -77,7 +77,7 @@ def fitDiff(old, new):
     return modified,added,removed
 
 @gitDirOperation(repoDir)
-def prepareResolutionForm(conflicts):
+def prepareResolutionForm(conflicts, filePath):
     lines =  [('++', c) for c in conflicts['add']]
     lines += [('**', c) for c in conflicts['mod']]
     lines += [('*-', c) for c in conflicts['modRem']]
@@ -85,7 +85,7 @@ def prepareResolutionForm(conflicts):
 
     lines.sort(key=lambda a: a[1])
 
-    fileout = open(fitFile, 'w')
+    fileout = open(filePath, 'w')
     fileout.write('\n'.join(conflictIntructions))
     fileout.write('\n'.join(["[]  %s  %s"%l for l in lines]))
     fileout.close()

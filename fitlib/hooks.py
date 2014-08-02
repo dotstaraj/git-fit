@@ -27,7 +27,7 @@ has not been told about will abort the commit.
 def postCheckout(mergeOld, mergeNew):
     mergeWorking = dict(mergeOld)
     saveItems(mergeWorking, quiet=True)
-    mergeWorking, conflicts, modified, added, removed = getMergedFit(mergeOld, mergeWorking, mergeNew)
+    mergeWorking, modified, added, removed, conflicts = getMergedFit(mergeOld, mergeWorking, mergeNew)
     restoreItems(mergeWorking, modified, added, removed, quiet=True)
 
 @gitDirOperation(repoDir)
