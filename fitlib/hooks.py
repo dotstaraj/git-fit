@@ -1,4 +1,5 @@
-from . import gitDirOperation, repoDir, savesDir, commitsDir, getHeadRevision
+from . import gitDirOperation, repoDir, savesDir, commitsDir, getHashForRevision
+from . import getFitManifestChanges, dirtyGitItemsFilter, readFitFile
 from changes import getStagedOffenders, saveItems, restoreItems
 from merge import getMergedFit
 from subprocess import PIPE, Popen as popen
@@ -22,28 +23,45 @@ has not been told about will abort the commit.
 ********** git-fit has aborted this commit **********
 '''.split('\n')
 
+def _getWorkingTreeStateForLastHead(fitData, fitManifestChanges):
+    popen('git checkout HEAD@{1}'.split() + list(fitManifestChanges)).wait()
+    saveItems(fitData, quiet=True)
+    popen('git checkout HEAD'.split() + list(fitManifestChanges)).wait()
+    return fitData
 
 @gitDirOperation(repoDir)
-def postCheckout(mergeOld, mergeNew):
-    mergeWorking = dict(mergeOld)
-    saveItems(mergeWorking, quiet=True)
+def postCheckout():
+    fitfileChanged = False
+    fitManifestChanges = set(getFitManifestChanges())
+    if '.fit' in fitManifestChanges:
+        fitfileChanged = True
+        fitManifestChanges.remove('.fit')
+    dirtyManifestItems = set(dirtyGitItemsFilter(fitManifestChanges))
+    fitManifestChanges -= dirtyManifestItems
+
+    if not fitfileChanged and len(fitManifestChanges) == 0:
+        return
+
+    mergeOld = readFitFile(rev='HEAD@{1}')
+    mergeNew = readFitFile()
+    mergeWorking = _getWorkingTreeStateForLastHead(dict(mergeOld), fitManifestChanges)
     mergeWorking, modified, added, removed, conflicts = getMergedFit(mergeOld, mergeWorking, mergeNew)
-    restoreItems(mergeWorking, modified, added, removed, quiet=True)
+    restoreItems(mergeNew, modified, removed, added, quiet=True)
 
 @gitDirOperation(repoDir)
-def postCommit(fitTrackedData):
+def postCommit():
     fitFileHash = popen('git ls-tree HEAD .fit'.split(), stdout=PIPE).communicate()[0].strip()
     if fitFileHash:
         fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
     if exists(savesFile):
-        move(savesFile, joinpath(commitsDir, getHeadRevision()))
+        move(savesFile, joinpath(commitsDir, getHashForRevision()))
 
     # 1 notify warning if un-committed changes exist
     # 2 Notify warning to unignore items that were untracked in the commit
 
 @gitDirOperation(repoDir)
-def preCommit(fitTrackedData):
+def preCommit():
     offenders = getStagedOffenders()
 
     if sum(len(l) for l in offenders) == 0:

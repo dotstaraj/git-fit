@@ -281,7 +281,6 @@ def _restorePopulate(restoreType, objects, fitTrackedData, quiet=False):
 
 @gitDirOperation(repoDir)
 def save(fitTrackedData, quiet=False, pathArgs=None):
-    fitDataChanged = False
     changes = None
     if merge.isMergeInProgress():
         workingTreeSelections = merge.resolve(fitTrackedData)
@@ -293,10 +292,8 @@ def save(fitTrackedData, quiet=False, pathArgs=None):
         writeFitFile(fitTrackedData)
     else:
         changes = saveItems(fitTrackedData, pathArgs=pathArgs)
-        fitDataChanged = sum(len(c) for c in changes) > 0
-
-    if fitDataChanged:
-        writeFitFile(fitTrackedData)
+        if sum(len(c) for c in changes) > 0:
+            writeFitFile(fitTrackedData)
 
     fitFileStatus = getFitFileStatus()
     if len(fitFileStatus) == 0 or fitFileStatus[1] == ' ':
@@ -319,13 +316,13 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     if not changes:
         if not quiet:
             print 'Nothing to save (no changes detected).'
-        return
+        return {},set()
     
     modified, added, removed, untracked = changes
 
     sizes = [s.st_size for s in [stat(f) for f in added]]
     newHashes = computeHashes(list(added))
-    added = zip(added, zip(newHashes, sizes))
+    added = dict(zip(added, zip(newHashes, sizes)))
 
     added.update(modified)
     removed |= untracked

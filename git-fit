@@ -6,8 +6,7 @@ from os.path import dirname, realpath, join as joinpath, exists
 from sys import argv
 from subprocess import call
 from fitlib import fitDir, cacheDir, repoDir, gitDir, tempDir, commitsDir, savesDir
-from fitlib import mergeMineFitFile, readFitFile, firstTimeFile, printAsText
-from fitlib import readFitFileForRevision, fitFileDiffFromRevision
+from fitlib import mergeMineFitFile, readFitFile, firstTimeFile, printAsText, getHashForRevision
 from fitlib import hooks, objects, merge, changes
 import stat
 
@@ -27,27 +26,25 @@ def main():
         elif argv[1] == 'restore':
             changes.restore(readFitFile(), pathArgs=opts.paths)
         elif argv[1] == 'get':
-            objects.get(readFitFileForRevision(), pathArgs=opts.paths, summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
+            objects.get(readFitFile(rev='HEAD'), pathArgs=opts.paths, summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
         elif argv[1] ==  'put':
-            objects.put(readFitFileForRevision(), summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
+            objects.put(readFitFile(rev='HEAD'), summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
     elif not opts.git:
         changes.printStatus(readFitFile(), pathArgs=opts.paths, legend=opts.legend, showall=opts.all)
     elif opts.git == 'pre-commit':
-        hooks.preCommit(readFitFile())
+        hooks.preCommit()
     elif opts.git == 'post-commit':
-        hooks.postCommit(readFitFile())
+        hooks.postCommit()
     elif opts.git_head_change:
-        autoMergeRestore = (
+        if (
+            (
                 opts.git == 'post-merge'
                 or (opts.git == 'post-rewrite' and opts.paths[0] == 'rebase')
-                or (opts.git == 'post-checkout' and opts.paths[0] == '1')
-            ) and fitFileDiffFromRevision()
-
-        if autoMergeRestore:
-            fitTrackedData = readFitFile()
-            lastFitTrackedData = readFitFileForRevision('HEAD@{1}')
-            if fitTrackedData != lastFitTrackedData:
-                hooks.postCheckout(fitTrackedData, lastFitTrackedData)
+                or (opts.git == 'post-checkout' and opts.paths[0] != opts.paths[1] and opts.paths[2] == '1')
+            )
+            and getHashForRevision('HEAD@{1}')
+        ):
+            hooks.postCheckout()
     elif opts.git == 'merge-driver':
         merge.mergeDriver(*(opts.paths[:3]))
     elif opts.git == 'text-output':
@@ -104,7 +101,7 @@ def firstTimeRepoSetup(nohooks=False):
     
     createHook('pre-commit')
     createHook('post-commit')
-    createHook('post-checkout', '--git-head-change ${3}')
+    createHook('post-checkout', '--git-head-change ${1} ${2} ${3}')
     createHook('post-merge', '--git-head-change')
     createHook('post-rewrite', '--git-head-change  ${1}')
 

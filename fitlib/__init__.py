@@ -4,6 +4,8 @@ from tempfile import mkstemp
 from json import load, dump
 from paths import fitMapToTree, fitTreeToMap
 import re
+from gzip import GzipFile as gz
+from StringIO import StringIO
 
 # Below two lines prevents Python raising an exception
 # when piping output to commands like less, head that
@@ -76,18 +78,26 @@ def fitStats(filename):
     stats = stat(filename)
     return stats.st_size, stats.st_mtime, stats.st_ctime, stats.st_ino
 
-def readFitFile(filePath=fitFile):
-    if not (path.exists(filePath) and path.getsize(filePath) > 0):
+def readFitFile(filePath=fitFile, rev=None):
+    if rev:
+        fitDataString = _getFitDataStringForRev(rev=rev)
+        try:
+            return load(gz(None,None,None,StringIO(fitDataString)))
+        except:
+            return fitTreeToMap(_readFitFileRec(StringIO(fitDataString)))
+    elif not (path.exists(filePath) and path.getsize(filePath) > 0):
         return {}
-
-    if filePath in filterBinaryFiles([filePath]):
-        from gzip import open as gz
-        return load(gz(filePath))
     else:
-        fitFileIn = open(filePath)
-        fitData = fitTreeToMap(_readFitFileRec(fitFileIn))
-        fitFileIn.close()
-        return fitData
+        try:
+            return load(gz(filePath))
+        except:
+            fitFileIn = open(filePath)
+            fitData = fitTreeToMap(_readFitFileRec(fitFileIn))
+            fitFileIn.close()
+            return fitData
+
+def _getFitDataStringForRev(rev):
+    return popen(('git show %s:.fit'%rev).split(), stdout=PIPE).communicate()[0]
     
 def _readFitFileRec(fitFileIn):
     items = {}
@@ -162,35 +172,28 @@ def getFitSize(fitTrackedData):
     return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
 
 def getCommitFile(rev=None):
-    return path.join(commitsDir, rev or getHeadRevision() or '---')
+    return path.join(commitsDir, rev or getHashForRevision() or '---')
 
-def getHeadRevision():
-    return popen('git rev-parse HEAD'.split(), stdout=PIPE).communicate()[0].strip()
+def getHashForRevision(rev='HEAD'):
+    return popen(('git rev-parse %s'%rev).split(), stdout=PIPE).communicate()[0].strip()
 
-def fitFileDiffFromRevision(rev='HEAD@{1}'):
-    stdout, stderr = popen(('git diff --name-only %s -- %s'%(rev,fitFile)).split(), stdout=PIPE).communicate()
-    return stdout.strip() != '' and stderr.strip() == ''
+@gitDirOperation(repoDir)
+def getFitManifestChanges(rev='HEAD@{1}'):
+    lines = popen(("git diff-tree -r --name-only %s HEAD -- *.gitattributes .fit"%rev).split(), stdout=PIPE).communicate()[0].strip()
+    return lines.split('\n') if lines else []
 
+@gitDirOperation(repoDir)
+def dirtyGitItemsFilter(items):
+    lines = popen('git status --porcelain -u --ignored'.split() + list(items), stdout=PIPE).communicate()[0].rstrip()
+    return [l.split(None, 1)[1] for l in lines.split('\n')] if lines else []
+
+@gitDirOperation(repoDir)
 def getStagedFitFileHash():
-    return popen(('git ls-files -s %s'%fitFile).split(), stdout=PIPE).communicate()[0].strip().split()[1]
+    return popen('git ls-files -s .fit'.split(), stdout=PIPE).communicate()[0].strip().split()[1]
 
+@gitDirOperation(repoDir)
 def getFitFileStatus():
-    return popen(('git status --porcelain -u --ignored %s'%fitFile).split(), stdout=PIPE).communicate()[0].strip()
-
-def readFitFileForRevision(rev='HEAD'):
-    fitData = popen(('git show %s:%s'%(rev,fitFile)).split(), stdout=PIPE, stderr=PIPE).communicate()[0]
-    if len(fitData) == 0:
-        return {}
-
-    (tempHandle, tempFile) = mkstemp(dir=tempDir)
-    osclose(tempHandle)
-    tempHandle = open(tempFile, 'wb')
-    tempHandle.write(fitData)
-    tempHandle.close()
-
-    fitData = readFitFile(tempFile)
-    remove(tempFile)
-    return fitData
+    return popen('git status --porcelain -u --ignored .fit'.split(), stdout=PIPE).communicate()[0].rstrip()
 
 def filterBinaryFiles(files):
     binaryFiles = []

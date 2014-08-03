@@ -1,5 +1,5 @@
 from . import gitDirOperation, repoDir, fitFile, readFitFile, writeFitFile
-from . import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles
+from . import mergeOtherFitFile, mergeMineFitFile, filterBinaryFiles, getFitFileStatus
 from os import path, remove
 from shutil import move
 from subprocess import Popen as popen, PIPE
@@ -142,7 +142,7 @@ def cleanupMergeArtifacts():
 
 @gitDirOperation(repoDir)
 def isMergeInProgress():
-    fitFileStatus = popen('git status --porcelain .fit'.split(), stdout=PIPE).communicate()[0].strip()
+    fitFileStatus = getFitFileStatus()
     if fitFileStatus:
         fitFileStatus = fitFileStatus.split()[0]
     merging = 'U' in fitFileStatus or fitFileStatus in ('AA', 'DD')
