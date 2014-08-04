@@ -1,9 +1,9 @@
 from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getCommitFile
-from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir, workingDir
+from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, workingDir
 from paths import getValidFitPaths
 from subprocess import Popen as popen, PIPE
 from os.path import dirname, basename, exists, join as joinpath, getsize
-from os import walk, makedirs, remove, close as osclose
+from os import walk, makedirs, remove, close as osclose, mkdir
 from shutil import copyfile, move
 from sys import stdout
 from tempfile import mkstemp
@@ -40,7 +40,6 @@ def placeObjects(objects, progressCallback=lambda x: None):
         
         progressCallback(i)
 
-@gitDirOperation(repoDir)
 def removeObjects(objects):
     for obj in objects:
         path = joinpath(cacheDir, joinpath(obj[:2], obj[2:]))
@@ -51,7 +50,7 @@ def getUpstreamItems():
     return set(readFitFile(getCommitFile()))
 
 def getDownstreamItems(fitTrackedData, paths, stats):
-    return [p for p in paths if p in stats and stats[p][1][0] == 0 and not findObject(fitTrackedData[p][0])]
+    return [p for p in paths if not (p in stats or findObject(fitTrackedData[p][0]))]
 
 def getCacheSize(lru):
     return sum([sum([o[1] for o in e]) for e in lru])
@@ -128,15 +127,16 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
                 touched[filePath] = objHash
             else:
                 key = joinpath(objHash[:2], objHash[2:])
-                needed.append((filePath, key, objHash, objPath, size))
+                needed.append((filePath, key, objHash, joinpath(cacheDir, key), size))
 
     totalSize = sum([size for f,k,h,p,size in needed])
 
     if len(needed) == 0:
-        print 'No tranfers needed! %s items retrieved from cache and the rest already exist.'%len(touched)
+        if not quiet:
+            print 'No tranfers needed! %s items retrieved from cache and the rest already exist.'%len(touched)
     elif showlist:
         print
-        for filePath,k,h,p,size in needed:
+        for filePath,k,h,p,size in sorted(needed):
             print '  %6.2fMB  %s'%(size/1048576, filePath)
         print '\nThe above objects can be tranferred (total transfer size: %.2fMB).'%(totalSize/1048576)
         print 'You may run git-fit get to start the transfer.'
@@ -147,7 +147,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
         print 'Run \'git-fit get -l\' to list these items.'
     else:
         successes = []
-        _transfer(_get, needed, totalSize, fitTrackedData, successes)
+        _transfer(_get, needed, totalSize, fitTrackedData, successes, quiet)
 
         for filePath, objHash, size in successes:
             touched[filePath] = objHash
@@ -156,7 +156,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
 
 def _get(items, store, pp, successes, failures):
     if not exists(tempDir):
-        popen(['mkdir', '-p', tempDir]).wait()
+        mkdir(tempDir)
 
     for filePath,key,objHash,objPath,size in items:
         pp.newItem(filePath, size)
@@ -195,7 +195,8 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
     totalSize = sum([size for f,k,h,p,size in available])
 
     if len(available) == 0:
-        print 'No tranfers needed! There are no cached objects to put in external location for HEAD.'
+        if not quiet:
+            print 'No tranfers needed! There are no cached objects to put in external location for HEAD.'
     elif showlist:
         print
         for filePath,k,h,p,size in available:
@@ -209,7 +210,7 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
         print 'Run \'git-fit put -l\' to list these items.'
     else:
         successes = []
-        _transfer(_put, available, totalSize, fitTrackedData, successes)
+        _transfer(_put, available, totalSize, fitTrackedData, successes, quiet)
 
         for filePath, objHash, size in successes:
             del commitsFitData[filePath]
@@ -244,10 +245,15 @@ def _put(items, store, pp, successes, failures):
         if done:
             successes.append((filePath, objHash, size))
 
-def _transfer(method, items, size, fitTrackedData, successes):
+def _transfer(method, items, size, fitTrackedData, successes, quiet):
     pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
     pp.setTotalSize(size)
-    store = getDataStore(pp.updateProgress)
+    try:
+        store = getDataStore(pp.updateProgress)
+    except Exception as e:
+        print e
+        return
+
     failures = []
     items.sort()
 

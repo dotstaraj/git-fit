@@ -1,5 +1,5 @@
 from subprocess import Popen as popen, PIPE
-from os import stat, path, chdir, getcwd, devnull, close as osclose, remove
+from os import stat, path, chdir, getcwd, close as osclose, remove, mkdir, devnull
 from tempfile import mkstemp
 from json import load, dump
 from paths import fitMapToTree, fitTreeToMap
@@ -99,9 +99,6 @@ def readFitFile(filePath=fitFile, rev=None):
             fitData = fitTreeToMap(_readFitFileRec(fitFileIn))
             fitFileIn.close()
             return fitData
-
-def _getFitDataStringForRev(rev):
-    return popen(('git show %s:.fit'%rev).split(), stdout=PIPE).communicate()[0]
     
 def _readFitFileRec(fitFileIn):
     items = {}
@@ -166,6 +163,7 @@ def _gitHashInputProducer(stream, items):
         stream.flush()
     stream.close()
 
+@gitDirOperation(repoDir)
 def computeHashes(items):
     if not items:
         return []
@@ -186,12 +184,14 @@ def computeHashes(items):
     print '\r'+(' '*(45+int(numDigits)*2))+'\r',
     return hashes
 
+@gitDirOperation(repoDir)
 def refreshStats(items, filePath=statFile):
     stats = readStatFile(filePath=filePath)
     for i in items:
         stats[i] = (items[i], fitStats(i))
     writeStatFile(stats, filePath=filePath)
 
+@gitDirOperation(repoDir)
 def updateStats(items, filePath=statFile):
     oldStats = readStatFile(filePath=filePath)
     newStats = {}
@@ -233,14 +233,20 @@ def getFitSize(fitTrackedData):
     return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
 
 def getCommitFile(rev=None):
+    if not path.exists(commitsDir):
+        mkdir(commitsDir)
     return path.join(commitsDir, rev or getHashForRevision() or '---')
 
 def getHashForRevision(rev='HEAD'):
-    return popen(('git rev-parse %s'%rev).split(), stdout=PIPE).communicate()[0].strip()
+    return popen(('git rev-parse %s'%rev).split(), stdout=PIPE, stderr=open(devnull, 'wb')).communicate()[0].strip()
+
+@gitDirOperation(repoDir)
+def _getFitDataStringForRev(rev):
+    return popen(('git show %s:.fit'%rev).split(), stdout=PIPE, stderr=open(devnull, 'wb')).communicate()[0]
 
 @gitDirOperation(repoDir)
 def getFitManifestChanges(rev='HEAD@{1}'):
-    lines = popen(("git diff-tree -r --name-only %s HEAD -- *.gitattributes .fit"%rev).split(), stdout=PIPE).communicate()[0].strip()
+    lines = popen(("git diff-tree -r --name-only %s HEAD -- *.gitattributes .fit"%rev).split(), stdout=PIPE, stderr=open(devnull, 'wb')).communicate()[0].strip()
     return lines.split('\n') if lines else []
 
 @gitDirOperation(repoDir)
@@ -256,6 +262,7 @@ def getStagedFitFileHash():
 def getFitFileStatus():
     return popen('git status --porcelain -u --ignored .fit'.split(), stdout=PIPE).communicate()[0].rstrip()
 
+@gitDirOperation(repoDir)
 def filterBinaryFiles(files):
     binaryFiles = []
 

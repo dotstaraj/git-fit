@@ -1,5 +1,5 @@
 
-from . import fitStats, fitFile, gitDirOperation, repoDir, savesDir, workingDir
+from . import fitFile, gitDirOperation, repoDir, savesDir, workingDir
 from . import updateStats, refreshStats, addedStatFile, writeFitFile, readFitFile
 from . import filterBinaryFiles, getStagedFitFileHash, getFitFileStatus
 from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
@@ -7,14 +7,14 @@ from paths import getValidFitPaths
 import merge
 from subprocess import Popen as popen, PIPE
 from os.path import exists, dirname, join as joinpath
-from os import remove, makedirs, stat, listdir
+from os import remove, makedirs, stat, listdir, mkdir
 from shutil import copyfile
 import re
 from sys import stdout
 
 restoreMissingMessage = '''
 git-fit: %d objects were only lazily restored as empty stubs.
-         Run 'git-fit put -s' for more information.
+         Run 'git-fit get -s' for more information.
 '''
 
 def printLegend():
@@ -203,6 +203,7 @@ def restore(fitTrackedData, quiet=False, pathArgs=None):
     if missing > 0:
         print restoreMissingMessage%missing
 
+@gitDirOperation(repoDir)
 def restoreItems(fitTrackedData, modified, added, removed, quiet=False):
     for i in sorted(added):
         remove(i)
@@ -253,6 +254,7 @@ def save(fitTrackedData, paths=None, pathArgs=None, quiet=False):
         print '\nerror: The following items are empty, zero-byte files and cannot be added to fit:\n'
         for i in sorted(stubs):
             print '  ',i
+        print
         return False
 
     if len(added) + len(removed) > 0:
@@ -299,6 +301,8 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     return added,removed,stubs
 
 def _saveCache(newItems, fitTrackedData, oldStagedFitFileHash, newStagedFitFileHash):
+    if not exists(savesDir):
+        mkdir(savesDir)
     for l in listdir(savesDir):
         savesFile = joinpath(savesDir, l)
         oldSaveItems = readFitFile(savesFile)

@@ -139,7 +139,6 @@ def fitDiff(old, new):
 
     return modified,added,removed
 
-@gitDirOperation(repoDir)
 def prepareResolutionForm(conflicts, filePath):
     lines =  [('++', c) for c in conflicts['add']]
     lines += [('**', c) for c in conflicts['mod']]
@@ -153,7 +152,6 @@ def prepareResolutionForm(conflicts, filePath):
     fileout.write('\n'.join(["[]  %s  %s"%l for l in lines]))
     fileout.close()
 
-@gitDirOperation(repoDir)
 def resolve():
     resolutions = getResolutions()
     if resolutions == None:
@@ -168,11 +166,10 @@ def resolve():
 
     if not changes.save(mine, paths=working, quiet=True):
         return False
-        
+
     cleanupMergeArtifacts()
     return True
 
-@gitDirOperation(repoDir)
 def getResolutions():
     mineFitData = readFitFile(mergeMineFitFile)
     otherFitData = readFitFile(mergeOtherFitFile)
@@ -230,9 +227,8 @@ def getResolutions():
         print 'merge error: Line %d in the .fit file has an unmatched open parenthesis. Cannot continue...'%(n + 1)
         return None
 
-    return mergedFitData, mine, theirs, working, unresolved
+    return mineFitData, mine, theirs, working, unresolved
 
-@gitDirOperation(repoDir)
 def isMergeInProgress():
     fitFileStatus = getFitFileStatus()
     if fitFileStatus:
@@ -267,9 +263,9 @@ def getMergedFit(common, mine, other):
 
     allCon = addCon | modCon | modRemCon | remModCon
     
-    modified = otherMod - allCon
-    added = otherAdd - allCon
-    removed = (otherRem - mineRem) - allCon
+    modified = otherMod - mineMod - allCon
+    added = otherAdd - mineAdd - allCon
+    removed = otherRem - mineRem - allCon
 
     for i in modified | added:
         mine[i] = other[i]

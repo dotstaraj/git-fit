@@ -1,10 +1,10 @@
-from . import gitDirOperation, repoDir, savesDir, commitsDir, getHashForRevision
+from . import gitDirOperation, repoDir, savesDir, getCommitFile
 from . import getFitManifestChanges, dirtyGitItemsFilter, readFitFile
 from changes import getStagedOffenders, saveItems, restoreItems, restoreMissingMessage
 from merge import getMergedFit
 from subprocess import PIPE, Popen as popen
 from textwrap import fill as wrapline
-from os import remove
+from os import remove, mkdir, devnull
 from os.path import join as joinpath, exists
 from shutil import move
 
@@ -26,13 +26,13 @@ has not been told about will abort the commit.
 def _getWorkingTreeStateForLastHead(fitData, fitManifestChanges):
     if not fitManifestChanges:
         return fitData
-    popen('git checkout HEAD@{1}'.split() + list(fitManifestChanges)).wait()
+    popen('git checkout HEAD@{1}'.split() + list(fitManifestChanges), stdout=open(devnull, 'wb'), stderr=open(devnull, 'wb')).wait()
     try:
         saveItems(fitData, quiet=True)
     except:
         raise
     finally:
-        popen('git checkout HEAD'.split() + list(fitManifestChanges)).wait()
+        popen('git checkout HEAD'.split() + list(fitManifestChanges), stdout=open(devnull, 'wb'), stderr=open(devnull, 'wb')).wait()
     return fitData
 
 @gitDirOperation(repoDir)
@@ -53,6 +53,10 @@ def postCheckout():
 
     mergeWorking = _getWorkingTreeStateForLastHead(dict(mergeOld), fitManifestChanges)
     mergeWorking, modified, added, removed, conflicts = getMergedFit(mergeOld, mergeWorking, mergeNew)
+
+    # important, it might seem confusing and wrong, but the order of the 
+    # "remove" and "added" arguments below is actually right, so do not
+    # swap them
     missing = restoreItems(mergeNew, modified, removed, added, quiet=True)
     if missing > 0:
         print restoreMissingMessage%missing
@@ -64,7 +68,7 @@ def postCommit():
         fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
     if exists(savesFile):
-        move(savesFile, joinpath(commitsDir, getHashForRevision()))
+        move(savesFile, getCommitFile())
 
     # 1 notify warning if un-committed changes exist
     # 2 Notify warning to unignore items that were untracked in the commit
