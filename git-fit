@@ -24,7 +24,7 @@ def main():
                 print 'error: git-fit save can only be run without PATH arguments when merging.'
                 print merge.conflictMsg
             elif merge.resolve():
-                print 'Yay, sccessfully resolved all conflicts! Once there are no other git conflicts'
+                print '\nYay! Successfully resolved all conflicts! Once there are no other git conflicts'
                 print 'remaining for this merge, you can go ahead and commit the changes (which'
                 print 'include the .fit file).'
         elif argv[1] == 'restore':
@@ -60,7 +60,9 @@ def main():
         ):
             hooks.postCheckout()
     elif opts.git == 'merge-driver':
-        merge.mergeDriver(*(opts.paths[:3]))
+        merged = merge.mergeDriver(*(opts.paths[:3]))
+        
+        return exit(0 if merged else 1)
     elif opts.git == 'text-output':
         printAsText(readFitFile(opts.paths[0]))
 

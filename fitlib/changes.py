@@ -87,7 +87,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
 
         modifiedItems -= mergeItems
         addedItems -= mergeItems
-        modifiedItems -= mergeItems
+        removedItems -= mergeItems
         untrackedItems -= mergeItems
         unchangedItems -= mergeItems
 
@@ -118,7 +118,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
 
     if dirtyFit and exists(fitFile):
         print
-        print 'The .fit file contains recorded changes that have not yet been staged for commit.'
+        print 'The .fit file contains changes that have not yet been staged for commit.'
         if noChanges:
             print 'If you want to include these changes in a commit, you should run "git-fit save"'
             print 'to properly stage the .fit file (DO NOT stage it directly with git-add).'
@@ -173,7 +173,7 @@ def getChangedItems(fitTrackedData, trackedItems=None, paths=None, pathArgs=None
     # Check all existing items for modification by comparing their expected
     # hash sums (those stored in the .fit file) to their new, actual hash sums.
     stats = updateStats(existingItems)
-    modifiedItems = {i: (h,s[0]) for i,(h,s) in stats.iteritems() if h != fitTrackedData[i][0]}
+    modifiedItems = {i: [h,s[0]] for i,(h,s) in stats.iteritems() if h != fitTrackedData[i][0]}
     unchangedItems = existingItems - set(modifiedItems)
 
     return modifiedItems, newItems, removedItems, untrackedItems, unchangedItems, stats
@@ -263,7 +263,7 @@ def _restorePopulate(restoreType, objects, fitTrackedData, quiet=False):
     return (touched, missing)
 
 @gitDirOperation(repoDir)
-def save(fitTrackedData, paths=None, pathArgs=None, quiet=False):
+def save(fitTrackedData, paths=None, pathArgs=None, forceWrite=False, quiet=False):
     added,removed,stubs = saveItems(fitTrackedData, paths=paths, pathArgs=pathArgs, quiet=quiet)
 
     if stubs:
@@ -273,7 +273,7 @@ def save(fitTrackedData, paths=None, pathArgs=None, quiet=False):
         print
         return False
 
-    if len(added) + len(removed) > 0:
+    if len(added) + len(removed) > 0 or forceWrite:
         print 'Working-tree changes saved.'
         writeFitFile(fitTrackedData)
 
@@ -306,7 +306,7 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
 
     stats = updateStats(added, filePath=addedStatFile)
     stubs = set(added) - set(stats)
-    modified.update((i,(h,s[0])) for i,(h,s) in stats.iteritems())
+    modified.update((i,[h,s[0]]) for i,(h,s) in stats.iteritems())
     removed |= untracked
 
     fitTrackedData.update(modified)

@@ -38,6 +38,7 @@ mergeOtherFitFile = path.join(fitDir, 'merge-other')
 firstTimeFile = path.join(fitDir, 'first-time')
 cacheLruFile = path.join(fitDir, 'cache-lru')
 tempDir = path.join(fitDir, 'temp')
+fitManifestItemsTempDir = path.join(fitDir, 'manifest_items_tmp')
 
 _fitFileItemRgx = re.compile('([^:]+):\[([^,]+),(\d+)\],?')
 zeroByteSha1 = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'

@@ -26,31 +26,32 @@ has not been told about will abort the commit.
 def _getWorkingTreeStateForLastHead(fitData, fitManifestChanges):
     if not fitManifestChanges:
         return fitData
-    popen('git checkout HEAD@{1}'.split() + list(fitManifestChanges), stdout=open(devnull, 'wb'), stderr=open(devnull, 'wb')).wait()
+
+    if '.fit' in fitManifestChanges:
+        fitManifestChanges.remove('.fit')
+
+    if fitManifestChanges:
+        popen('git checkout HEAD@{1}'.split() + list(fitManifestChanges), stdout=open(devnull, 'wb'), stderr=open(devnull, 'wb')).wait()
     try:
         saveItems(fitData, quiet=True)
     except:
         raise
     finally:
-        popen('git checkout HEAD'.split() + list(fitManifestChanges), stdout=open(devnull, 'wb'), stderr=open(devnull, 'wb')).wait()
+        if fitManifestChanges:
+            popen('git checkout HEAD'.split() + list(fitManifestChanges), stdout=open(devnull, 'wb'), stderr=open(devnull, 'wb')).wait()
     return fitData
 
 @gitDirOperation(repoDir)
 def postCheckout():
     fitfileChanged = False
     fitManifestChanges = set(getFitManifestChanges())
-    if '.fit' in fitManifestChanges:
-        fitfileChanged = True
-        fitManifestChanges.remove('.fit')
-    dirtyManifestItems = set(dirtyGitItemsFilter(fitManifestChanges))
-    fitManifestChanges -= dirtyManifestItems
+    fitManifestChanges = fitManifestChanges - set(dirtyGitItemsFilter(fitManifestChanges))
 
-    if not fitfileChanged and len(fitManifestChanges) == 0:
+    if len(fitManifestChanges) == 0:
         return
 
     mergeOld = readFitFile(rev='HEAD@{1}')
     mergeNew = readFitFile()
-
     mergeWorking = _getWorkingTreeStateForLastHead(dict(mergeOld), fitManifestChanges)
     mergeWorking, modified, added, removed, conflicts = getMergedFit(mergeOld, mergeWorking, mergeNew)
 
@@ -66,7 +67,7 @@ def postCommit():
     fitFileHash = popen('git ls-tree HEAD .fit'.split(), stdout=PIPE).communicate()[0].strip()
     if not fitFileHash:
         return
-        
+
     fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
     if exists(savesFile):

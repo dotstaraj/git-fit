@@ -28,7 +28,7 @@ crfHeader = '''\
 # ==> 3. Proceed with the git merge process as usual.
 #
 # Run 'git-fit --merge-help' for more details on how to make valid and proper selections.
-==========================
+#
 
 '''.split('\n')
 
@@ -114,20 +114,23 @@ for rebase, "mine" refers to the version that you'd be bringing INTO your curren
 likewise, "theirs" actually refers to YOUR version that's already in the current branch itself.
 '''
 
-_conflictLine_re = re.compile('\s*([(]?)\s*\[([MOW]?)\]\s*([)]?)\s*(\*\*|\+\+|\*-|-\*)\s*(.+)\s*$')
+_conflictLine_re = re.compile('\s*([(]?)\s*\[([MTW]?)\]\s*([)]?)\s*(\*\*|\+\+|\*-|-\*)\s*(.+)\s*$')
 
 def mergeDriver(common, mine, other):
-    mergedFit, modified, added, removed, conflicts = getMergedFit(readFitFile(common), readFitFile(mine), readFitFile(other))
+    commonFit, mineFit, otherFit = readFitFile(common), readFitFile(mine), readFitFile(other)
+    mergedFit, modified, added, removed, conflicts = getMergedFit(commonFit, mineFit, otherFit)
 
-    if not conflicts:
+    if conflicts:
+        resolved = False
+        writeFitFile(mergedFit, mergeMineFitFile)
+        move(other, mergeOtherFitFile)
+        prepareResolutionForm(conflicts, mine)
+        print conflictMsg
+    else:
+        resolved = True
         writeFitFile(mergedFit, mine)
-        exit(0)
 
-    writeFitFile(mergedFit, mergeMineFitFile)
-    move(other, mergeOtherFitFile)
-    prepareResolutionForm(conflicts, mine)
-    print conflictMsg
-    exit(1)
+    return resolved
 
 def fitDiff(old, new):
     oldItems = set(old)
@@ -164,7 +167,7 @@ def resolve():
             print 'Line %s: %s'%u
         return False
 
-    if not changes.save(mine, paths=working, quiet=True):
+    if not changes.save(mergedFitData, paths=working, forceWrite=True, quiet=True):
         return False
 
     cleanupMergeArtifacts()
@@ -198,15 +201,8 @@ def getResolutions():
         resolution = resolution.upper()
 
         if batchOpen:
-            stack.append(resolution)
+            stack.append((resolution, n+1))
             batchResolution = resolution
-
-        if batchClose:
-            if len(stack) == 0:
-                print 'merge error: Line %d in the .fit file has an unmatched close parenthesis. Cannot continue...'%(n + 1)
-                return None
-            stack.pop()
-            batchResolution = '' if len(stack) == 0 else stack[-1]
 
         resolution = resolution or batchResolution
         
@@ -221,10 +217,17 @@ def getResolutions():
         elif resolution == 'W':
             working.append(item)
         else:
-            unresolved.append((item, n+1))
+            unresolved.append((n+1, item))
+
+        if batchClose:
+            if len(stack) == 0:
+                print 'merge error: Line %d in the .fit file has an unmatched close parenthesis. Cannot continue...'%(n + 1)
+                return None
+            stack.pop()
+            batchResolution = '' if len(stack) == 0 else stack[-1][0]
 
     if len(stack) > 0:
-        print 'merge error: Line %d in the .fit file has an unmatched open parenthesis. Cannot continue...'%(n + 1)
+        print 'merge error: Line %d in the .fit file has an unmatched open parenthesis. Cannot continue...'%stack.pop()[1]
         return None
 
     return mineFitData, mine, theirs, working, unresolved

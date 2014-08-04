@@ -230,7 +230,7 @@ def _put(items, store, pp, successes, failures):
 
         done = True
         if store.check(keyName):
-            pp.updateProgress(size, size, custom_item_string='NO TRANSFER NEEDED')
+            pp.updateProgress(size, size, custom_item_string='No transfer needed.')
         else:
             try:
                 transferred = store.put(objPath, keyName, size)
@@ -262,14 +262,14 @@ def _transfer(method, items, size, fitTrackedData, successes, quiet):
     pp.done()
     store.close()
     print
-    updateCache(successes, fitTrackedData)
+    updateLRUCache(successes, fitTrackedData)
 
     if len(failures) > 0:
         print 'Some items could not be transferred:'
         print '\n'.join(failures)
         print 'Above items could not be transferred:'
 
-def updateCache(objects, fitTrackedData):
+def updateLRUCache(objects, fitTrackedData):
     lru = readCacheFile()
     # lru is a queue, so append most recent to end of list
     lru.append([(h,s) for f,h,s in objects])
@@ -278,7 +278,6 @@ def updateCache(objects, fitTrackedData):
     cacheSize = getCacheSize(lru)
     if cacheSize > fitSize * 2:
         print 'Cache size (%.2fMB) is larger than twice the tracked size (%.2fMB).'%(cacheSize/1048576., fitSize/1048576.)
-        print '\tPruning will occur.'
     else:
         print 'Cache size is %.2fMB and tracked size is %.2fMB (will not prune at this time).'%(cacheSize/1048576., fitSize/1048576.)
 
