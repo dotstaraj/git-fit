@@ -64,8 +64,10 @@ def postCheckout():
 @gitDirOperation(repoDir)
 def postCommit():
     fitFileHash = popen('git ls-tree HEAD .fit'.split(), stdout=PIPE).communicate()[0].strip()
-    if fitFileHash:
-        fitFileHash = fitFileHash.split()[2]
+    if not fitFileHash:
+        return
+        
+    fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
     if exists(savesFile):
         move(savesFile, getCommitFile())

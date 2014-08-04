@@ -51,7 +51,8 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
         printLegend()
 
     trackedItems = getTrackedItems()
-    allItems = set(fitTrackedData) | trackedItems
+    fitItems = set(fitTrackedData)
+    allItems = fitItems | trackedItems
     paths = None if not pathArgs else getValidFitPaths(pathArgs, allItems, basePath=repoDir, workingDir=workingDir)
 
     modifiedItems, addedItems, removedItems, untrackedItems, unchangedItems, stats = getChangedItems(fitTrackedData, trackedItems=trackedItems, paths=paths)
@@ -65,7 +66,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
     untrackedItems = untrackedItems - offenders
     unchangedItems = unchangedItems - offenders
 
-    downstream = getDownstreamItems(fitTrackedData, allItems if paths == None else paths, stats)
+    downstream = getDownstreamItems(fitTrackedData, fitItems if paths == None else paths, stats)
     upstream = getUpstreamItems()
 
     modified,added,removed,untracked,unchanged = [],[],[],[],[]
@@ -100,7 +101,12 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
     conflict =      [('F  ', i) for i in conflict]
     binary =        [('B  ', i) for i in binary]
 
-    if all(len(l) == 0 for l in [modified,added,removed,untracked,unchanged,conflict,binary,upstream,downstream]):
+    fitFileStatus = getFitFileStatus()
+    dirtyFit = fitFileStatus and fitFileStatus[1] != ' '
+
+    noChanges = all(len(l) == 0 for l in [modified,added,removed,untracked,unchanged,conflict,binary,upstream,downstream])
+
+    if noChanges and not dirtyFit:
         print 'Nothing to show (no problems or changes detected).'
         return
 
@@ -110,6 +116,16 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
             print '  ', c, f
         print
 
+    if dirtyFit and exists(fitFile):
+        print
+        print 'The .fit file contains recorded changes that have not yet been staged for commit.'
+        if noChanges:
+            print 'If you want to include these changes in a commit, you should run "git-fit save"'
+            print 'to properly stage the .fit file (DO NOT stage it directly with git-add).'
+        else:
+            print 'If you run "git-fit save" both the new changes shown above and the recorded'
+            print 'changes in the current .fit file will be staged together.'
+        print
     if len(upstream) > 0:
         print ' * %s object(s) may need to be uploaded. Run \'git-fit put\' -s for details.'%len(upstream)
     if len(downstream) > 0:
@@ -258,6 +274,7 @@ def save(fitTrackedData, paths=None, pathArgs=None, quiet=False):
         return False
 
     if len(added) + len(removed) > 0:
+        print 'Working-tree changes saved.'
         writeFitFile(fitTrackedData)
 
     fitFileStatus = getFitFileStatus()
@@ -272,8 +289,8 @@ def save(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     newStagedFitFileHash = getStagedFitFileHash()
     print 'Staged .fit file.'
 
-    if added:
-        _saveCache(added, fitTrackedData, oldStagedFitFileHash, newStagedFitFileHash)
+    if oldStagedFitFileHash != newStagedFitFileHash:
+        _saveCache(added, fitTrackedData, newStagedFitFileHash)
 
     return True
 
@@ -289,27 +306,36 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
 
     stats = updateStats(added, filePath=addedStatFile)
     stubs = set(added) - set(stats)
-    added = {i:(h,s[0]) for i,(h,s) in stats.iteritems()}
-
-    added.update(modified)
+    modified.update((i,(h,s[0])) for i,(h,s) in stats.iteritems())
     removed |= untracked
 
-    fitTrackedData.update(added)
+    fitTrackedData.update(modified)
     for i in removed:
         del fitTrackedData[i]
 
-    return added,removed,stubs
+    return modified,removed,stubs
 
-def _saveCache(newItems, fitTrackedData, oldStagedFitFileHash, newStagedFitFileHash):
+def _saveCache(newItems, fitTrackedData, fitFileHash):
     if not exists(savesDir):
         mkdir(savesDir)
+
+    toAdd = dict(newItems)
+    toRemove = []
     for l in listdir(savesDir):
         savesFile = joinpath(savesDir, l)
         oldSaveItems = readFitFile(savesFile)
-        removeObjects(h for f,(h,s) in oldSaveItems.iteritems() if f not in newItems)
+        for i,f in oldSaveItems.iteritems():
+            if fitTrackedData.get(i) == f:
+                if i in newItems:
+                    del newItems[i]
+                else:
+                    toAdd[i] = f
+            else:
+                toRemove.append(f[0])
         remove(savesFile)
 
-    writeFitFile(newItems, joinpath(savesDir,newStagedFitFileHash))
+    writeFitFile(toAdd, joinpath(savesDir,fitFileHash))
+    removeObjects(toRemove)
 
     numNewItems = len(newItems)
     numDigits = str(len(str(numNewItems)+''))
