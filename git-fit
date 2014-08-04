@@ -13,24 +13,38 @@ import stat
 def main():
     opts = getOpts()
     firstTimeRepoSetup(opts.no_hooks)
-    doingMerge = merge.isMergeInProgress()
-
-    if doingMerge:
-        if len(argv) != 2 or argv[1] != 'save':
-            print merge.conflictMsg
-            return
 
     if len(argv) > 1 and argv[1] in ('save', 'restore', 'get', 'put'):
         if argv[1] == 'save':
-            changes.save(readFitFile(mergeMineFitFile if doingMerge else None), pathArgs=opts.paths)
+            if not merge.isMergeInProgress():
+                changes.save(readFitFile(), pathArgs=opts.paths)
+                return
+
+            if opts.paths:
+                print 'error: git-fit save can only be run without PATH arguments when merging.'
+                print merge.conflictMsg
+            elif merge.resolve():
+                print 'Yay, sccessfully resolved all conflicts! Once there are no other git conflicts'
+                print 'remaining for this merge, you can go ahead and commit the changes (which'
+                print 'include the .fit file).'
         elif argv[1] == 'restore':
             changes.restore(readFitFile(), pathArgs=opts.paths)
         elif argv[1] == 'get':
-            objects.get(readFitFile(rev='HEAD'), pathArgs=opts.paths, summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
+            objects.get(readFitFile(rev='HEAD'), summary=opts.summary, showlist=opts.list, quiet=opts.quiet, pathArgs=opts.paths)
         elif argv[1] ==  'put':
             objects.put(readFitFile(rev='HEAD'), summary=opts.summary, showlist=opts.list, quiet=opts.quiet)
+    elif opts.merge_help:
+        print merge.instructions
     elif not opts.git:
-        changes.printStatus(readFitFile(), pathArgs=opts.paths, legend=opts.legend, showall=opts.all)
+        if merge.isMergeInProgress():
+            resolutions = merge.getResolutions()
+            if not resolutions:
+                return
+            fitData, resolutions = resolutions[0], resolutions[1:]
+        else:
+            fitData = readFitFile()
+            resolutions = None
+        changes.printStatus(fitData, pathArgs=opts.paths, legend=opts.legend, showall=opts.all, mergeInfo=resolutions)
     elif opts.git == 'pre-commit':
         hooks.preCommit()
     elif opts.git == 'post-commit':
@@ -129,6 +143,7 @@ def getOpts():
         parser.add_argument('--git', choices=('post-commit','pre-commit','post-checkout','post-merge','post-rewrite','merge-driver','text-output'))
         parser.add_argument('--all', '-a', action='store_true')
         parser.add_argument('--legend', '-l', action='store_true')
+        parser.add_argument('--merge-help', '-m', action='store_true')
         parser.add_argument('paths', nargs='*')
     elif argv[1] in ('save', 'restore'):
         usage = 'git-fit %s [--help] [<PATH>...]'%(argv[1])
@@ -179,7 +194,7 @@ helpUsage='''
 Usage:
     git-fit [<COMMAND>] [-h] [--help]
 
-    git-fit         [--legend] [--all] [<PATH>...]
+    git-fit         [--legend] [--all] [--merge-help] [<PATH>...]
     git-fit save    [<PATH>...]
     git-fit restore [<PATH>...]
     git-fit get     [--summary] [--list] [--quiet] [<PATH>...]
@@ -206,20 +221,21 @@ Options:
     --help          Show full help for the command.
 
     status
-    -l, --legend    Print a legend showing what status symbols mean.
-    -a, --all       List even those items whose status is unchanged.
+    -l, --legend       Print a legend showing what status symbols mean.
+    -a, --all          List even those items whose status is unchanged.
+    -m, --merge-help   Print out instructions for resolving fit conflicts.
 
     get/put''' + cmdGetPutOpts
 
 cmdGetUsage = '[--summary] [--list] [--quiet] [<PATH>...]'
 cmdPutUsage = '[--summary] [--list] [--quiet]'
 cmdSaveHelp = '''
-Updates .fit file with current changes to fit items in the working tree. The .fit file will
-also be git-added (which you can then commit along with any other non-fit changes). After
+Updates .fit file with current changes to fit items in the working tree. The .fit file is
+also git-added (which you can then commit along with any other non-fit changes). After
 running this command, any items that were shown as modified, added, removed, or untracked
-(*, +, -, ~) by the status output of git-fit will no longer be shown as such, since those
-changes will have been saved in the .fit file. However, any potential commit-aborting items
-will continue to be shown in the status.
+(*, +, -, ~) by the status output of git-fit are no longer shown as such, since those
+changes have been recorded in the .fit file. However, any potential commit-aborting items
+continue to be shown in the status.
 
 The IMPORTANT thing to remember is that the .fit file should NEVER be manually changed or
 manually git-add'ed. Both the updating/changing of the .fit file and it's staging to the

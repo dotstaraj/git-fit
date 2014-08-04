@@ -1,6 +1,6 @@
 from . import gitDirOperation, repoDir, savesDir, commitsDir, getHashForRevision
 from . import getFitManifestChanges, dirtyGitItemsFilter, readFitFile
-from changes import getStagedOffenders, saveItems, restoreItems
+from changes import getStagedOffenders, saveItems, restoreItems, restoreMissingMessage
 from merge import getMergedFit
 from subprocess import PIPE, Popen as popen
 from textwrap import fill as wrapline
@@ -24,9 +24,15 @@ has not been told about will abort the commit.
 '''.split('\n')
 
 def _getWorkingTreeStateForLastHead(fitData, fitManifestChanges):
+    if not fitManifestChanges:
+        return fitData
     popen('git checkout HEAD@{1}'.split() + list(fitManifestChanges)).wait()
-    saveItems(fitData, quiet=True)
-    popen('git checkout HEAD'.split() + list(fitManifestChanges)).wait()
+    try:
+        saveItems(fitData, quiet=True)
+    except:
+        raise
+    finally:
+        popen('git checkout HEAD'.split() + list(fitManifestChanges)).wait()
     return fitData
 
 @gitDirOperation(repoDir)
@@ -44,9 +50,12 @@ def postCheckout():
 
     mergeOld = readFitFile(rev='HEAD@{1}')
     mergeNew = readFitFile()
+
     mergeWorking = _getWorkingTreeStateForLastHead(dict(mergeOld), fitManifestChanges)
     mergeWorking, modified, added, removed, conflicts = getMergedFit(mergeOld, mergeWorking, mergeNew)
-    restoreItems(mergeNew, modified, removed, added, quiet=True)
+    missing = restoreItems(mergeNew, modified, removed, added, quiet=True)
+    if missing > 0:
+        print restoreMissingMessage%missing
 
 @gitDirOperation(repoDir)
 def postCommit():

@@ -1,5 +1,5 @@
 from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getCommitFile
-from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir
+from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, commitsDir, workingDir
 from paths import getValidFitPaths
 from subprocess import Popen as popen, PIPE
 from os.path import dirname, basename, exists, join as joinpath, getsize
@@ -26,7 +26,6 @@ def getDataStore(progressCallback):
         print 'error: Could not load the data store configured in fit.datastore.'
         raise
 
-@gitDirOperation(repoDir)
 def findObject(obj):
     path = joinpath(cacheDir, joinpath(obj[:2], obj[2:]))
     return path if exists(path) else None
@@ -52,7 +51,7 @@ def getUpstreamItems():
     return set(readFitFile(getCommitFile()))
 
 def getDownstreamItems(fitTrackedData, paths, stats):
-    return [p for p in paths if p in stats and stats[p][0] == 0 and not findObject(fitTrackedData[p][0])]
+    return [p for p in paths if p in stats and stats[p][1][0] == 0 and not findObject(fitTrackedData[p][0])]
 
 def getCacheSize(lru):
     return sum([sum([o[1] for o in e]) for e in lru])
@@ -113,7 +112,7 @@ class _QuietProgressPrinter:
 @gitDirOperation(repoDir)
 def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=False):    
     allItems = fitTrackedData.keys()
-    validPaths = getValidFitPaths(pathArgs, allItems, repoDir) if pathArgs else allItems
+    validPaths = getValidFitPaths(pathArgs, allItems, basePath=repoDir, workingDir=workingDir) if pathArgs else allItems
 
     needed = []   # not in working tree nor in cache, must be downloaded
     touched = {}

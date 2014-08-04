@@ -4,6 +4,8 @@ from tempfile import mkstemp
 from json import load, dump
 from paths import fitMapToTree, fitTreeToMap
 import re
+from threading import Thread as thread
+from sys import stdout
 from gzip import GzipFile as gz
 from StringIO import StringIO
 
@@ -30,6 +32,7 @@ cacheDir = path.join(fitDir, 'objects')
 savesDir = path.join(fitDir, 'saves')
 commitsDir = path.join(fitDir, 'commits')
 statFile = path.join(fitDir, 'stat')
+addedStatFile = path.join(fitDir, 'stat.added')
 mergeMineFitFile = path.join(fitDir, 'merge-mine')
 mergeOtherFitFile = path.join(fitDir, 'merge-other')
 firstTimeFile = path.join(fitDir, 'first-time')
@@ -37,6 +40,7 @@ cacheLruFile = path.join(fitDir, 'cache-lru')
 tempDir = path.join(fitDir, 'temp')
 
 _fitFileItemRgx = re.compile('([^:]+):\[([^,]+),(\d+)\],?')
+zeroByteSha1 = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'
 
 # Parameterized decorator that will wrap the decoratee with a cd into the git directory
 # before running the operation, and a cd back into the starting directory afterwards.
@@ -146,13 +150,76 @@ def printAsText(fitData):
     items = sorted([(b[:7],a) for a,(b,c) in  fitData.iteritems()], key=lambda i:i[1])
     print '\n'.join(['%s %s'%(h,p) for h,p in items])
 
-def readStatFile():
-    return load(open(statFile)) if path.exists(statFile) else {}
+# The stat file is a Python-pickled dictionary of the following form:
+#   {filename --> (st_size, st_mtime, st_ctime, st_ino, checksum_hash)}
+def readStatFile(filePath=statFile):
+    return load(open(filePath)) if path.exists(filePath) else {}
 
-def writeStatFile(stats):
-    statOut = open(statFile, 'wb')
+def writeStatFile(stats, filePath=statFile):
+    statOut = open(filePath, 'wb')
     dump(stats, statOut)
     statOut.close()
+
+def _gitHashInputProducer(stream, items):
+    for j in items:
+        print >>stream, j
+        stream.flush()
+    stream.close()
+
+def computeHashes(items):
+    if not items:
+        return []
+
+    hashes = []
+    numItems = len(items)
+    numDigits = str(len(str(numItems)+''))
+    progress_fmt = ('\rComputing hashes for new objects...%6.2f%%  '+'%'+numDigits+'s/%'+numDigits+'s')
+    print progress_fmt%(0, 0, numItems),
+    p = popen('git hash-object --stdin-paths'.split(), stdin=PIPE, stdout=PIPE)
+    thread(target=_gitHashInputProducer, args=(p.stdin,items)).start()
+    i = 0
+    for l in p.stdout:
+        hashes.append(l.strip())
+        i += 1
+        print progress_fmt%(i*100./numItems, i, numItems),
+        stdout.flush()
+    print '\r'+(' '*(45+int(numDigits)*2))+'\r',
+    return hashes
+
+def refreshStats(items, filePath=statFile):
+    stats = readStatFile(filePath=filePath)
+    for i in items:
+        stats[i] = (items[i], fitStats(i))
+    writeStatFile(stats, filePath=filePath)
+
+def updateStats(items, filePath=statFile):
+    oldStats = readStatFile(filePath=filePath)
+    newStats = {}
+    for i in items:
+        stats = fitStats(i)
+        if stats[0] > 0:
+            newStats[i] = stats
+
+    # An item is "touched" if its cached stats don't match its new stats.
+    # "Touched" is a necessary but not sufficient condition for an item to
+    # be considered "modified". Modified items are those that are touched
+    # AND whose checksums are different, so we do checksum comparisons next
+    touched = [i for i,s in newStats.iteritems() if i not in oldStats or tuple(oldStats[i][1]) != s]
+    touched = dict(zip(touched, computeHashes(touched)))
+
+    statsUpdated = False
+    if len(touched) > 0:
+        statsUpdated = True
+        for i,h in touched.iteritems():
+            oldStats[i] = (h,newStats[i])
+    if len(newStats) != len(oldStats):
+        statsUpdated = True
+        for s in set(oldStats) - set(newStats):
+            del oldStats[s]
+    if statsUpdated:
+        writeStatFile(oldStats, filePath=filePath)
+
+    return oldStats
 
 def readCacheFile():
     return load(open(cacheLruFile)) if path.exists(cacheLruFile) else []
@@ -161,12 +228,6 @@ def writeCacheFile(lru):
     cacheOut = open(cacheLruFile, 'wb')
     dump(lru, cacheOut)
     cacheOut.close()
-
-def refreshStats(items):
-    stats = readStatFile()
-    for i in items:
-        stats[i] = (items[i], fitStats(i))
-    writeStatFile(stats)
 
 def getFitSize(fitTrackedData):
     return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
