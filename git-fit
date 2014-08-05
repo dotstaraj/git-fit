@@ -119,18 +119,19 @@ def firstTimeRepoSetup(noHooks=False):
     f.write('\n.fit\n')
     f.close()
 
-    def createHook(name, args=''):
+    def createHook(name, noHooks=False, args=''):
         f = open(joinpath(gitDir, 'hooks', name), 'w')
-        f.write('\n$fitt --git=%s %s\n'%(name,args))
+        if not noHooks:
+            f.write('\n$fitt --git=%s %s\n'%(name,args))
         f.close()
         chmod(joinpath(gitDir, 'hooks', name), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     
-    if not noHooks:
-        createHook('pre-commit')
-        createHook('post-commit')
-        createHook('post-checkout', '--git-head-change ${1} ${2} ${3}')
-        createHook('post-merge', '--git-head-change')
-        createHook('post-rewrite', '--git-head-change  ${1}')
+    
+    createHook('pre-commit', noHooks=noHooks)
+    createHook('post-commit', noHooks=noHooks)
+    createHook('post-checkout', noHooks=noHooks, args='--git-head-change ${1} ${2} ${3}')
+    createHook('post-merge', noHooks=noHooks, args='--git-head-change')
+    createHook('post-rewrite', noHooks=noHooks, args='--git-head-change  ${1}')
 
     cmd = '''
         git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
