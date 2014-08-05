@@ -71,14 +71,19 @@ def postCommit():
 
     fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
+    committed = []
     if exists(savesFile):
-        cache.commit({h for f,(h,s) in readFitFile(savesFile).iteritems()})
+        committed = cache.commit({h for f,(h,s) in readFitFile(savesFile).iteritems()})
         move(savesFile, getCommitFile())
 
     if checkForChanges(readFitFile()):
-        print 'Note: your commit did not include fit-related changes that currently exist in'
-        print 'the working tree. If you did in fact want to include those changes in the commit'
-        print 'and forgot, you can run "git-fit save" now, followed by git-commit --amend.'
+        print 'git-fit: This commit did not include some fit changes that currently exist in'
+        print '  the working tree. If you did in fact want to include those changes in the'
+        print '  commit, you can run "git-fit save", followed by git-commit --amend.'
+    if len(committed) > 0:
+        print 'git-fit: This commit included new objects that have been placed in your local'
+        print '  cache. If you plan to git-fit push this commit, you must first copy these'
+        print '  objects to the datastore configured for this repository bt running git-fit put.'
 
 @gitDirOperation(repoDir)
 def preCommit():
