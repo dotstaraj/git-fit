@@ -222,14 +222,6 @@ def updateStats(items, filePath=statFile):
 
     return oldStats
 
-def readCacheFile():
-    return load(open(lruFile)) if path.exists(lruFile) else []
-
-def writeCacheFile(lru):
-    cacheOut = open(lruFile, 'wb')
-    dump(lru, cacheOut)
-    cacheOut.close()
-
 def getFitSize(fitTrackedData):
     return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
 

@@ -142,7 +142,7 @@ def firstTimeRepoSetup(noHooks=False):
 
     print 'Restoring working tree...',
     changes.restore(readFitFile(), quiet=True)
-    print 'Done.\n'
+    print 'Done.'
 
 def getOpts():
     parser = None

@@ -1,6 +1,7 @@
 from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getCommitFile
-from . import repoDir, fitDir, objectsDir, tempDir, readCacheFile, writeCacheFile, workingDir
+from . import repoDir, fitDir, objectsDir, tempDir, workingDir
 from paths import getValidFitPaths
+import cache
 from subprocess import Popen as popen, PIPE
 from os.path import dirname, basename, exists, join as joinpath, getsize
 from os import walk, makedirs, remove, close as osclose, mkdir
@@ -26,39 +27,12 @@ def getDataStore(progressCallback):
         print 'error: Could not load the data store configured in fit.datastore.'
         raise
 
-def findObject(obj):
-    path = joinpath(objectsDir, joinpath(obj[:2], obj[2:]))
-    return path if exists(path) else None
-
-@gitDirOperation(repoDir)
-def placeObjects(objects, progressCallback=lambda x: None):
-    existing = set()
-    for i, (obj, src) in enumerate(objects):
-        dst = joinpath(objectsDir, joinpath(obj[:2], obj[2:]))
-        if not exists(dst):
-            popen(('mkdir -p %s'%dirname(dst)).split()).wait()
-            popen(('cp %s %s'%(src, dst)).split()).wait()
-        else:
-            existing.add(obj)
-        
-        progressCallback(i)
-
-    return existing
-
-def removeObjects(objects):
-    for obj in objects:
-        path = joinpath(objectsDir, joinpath(obj[:2], obj[2:]))
-        if exists(path):
-            remove(path)
-
 def getUpstreamItems():
-    return set(readFitFile(getCommitFile()))
+    return set(f for f,(h,s) in readFitFile(getCommitFile()) if h in cache.getCommittedObjects())
 
 def getDownstreamItems(fitTrackedData, paths, stats):
-    return [p for p in paths if not (p in stats or findObject(fitTrackedData[p][0]))]
-
-def getCacheSize(lru):
-    return sum([sum([o[1] for o in e]) for e in lru])
+    cached = cache.find((fitTrackedData[p][0] for p in paths), update=False)
+    return [p for p in paths if not (p in stats or fitTrackedData[p][0] in cached)]
 
 class _ProgressPrinter:
     def __init__(self):
@@ -121,27 +95,27 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
     needed = []   # not in working tree nor in cache, must be downloaded
     touched = {}
 
+    cached = cache.find(fitTrackedData[f][0] for f in validPaths)
     for filePath in validPaths:
         objHash, size = fitTrackedData[filePath]
         if exists(filePath) and getsize(filePath) == 0:
-            objPath = findObject(objHash)
+            objPath = cached.get(objHash)
             fileDir = dirname(filePath)
             fileDir and (exists(fileDir) or makedirs(fileDir))
             if objPath:
                 copyfile(objPath, filePath)
                 touched[filePath] = objHash
             else:
-                key = joinpath(objHash[:2], objHash[2:])
-                needed.append((filePath, key, objHash, joinpath(objectsDir, key), size))
+                needed.append((filePath, objHash, size))
 
-    totalSize = sum([size for f,k,h,p,size in needed])
+    totalSize = sum([size for f,h,size in needed])
 
     if len(needed) == 0:
         if not quiet:
             print 'No tranfers needed! %s items retrieved from cache and the rest already exist.'%len(touched)
     elif showlist:
         print
-        for filePath,k,h,p,size in sorted(needed):
+        for filePath,h,size in sorted(needed):
             print '  %6.2fMB  %s'%(size/1048576, filePath)
         print '\nThe above objects can be tranferred (total transfer size: %.2fMB).'%(totalSize/1048576)
         print 'You may run git-fit get to start the transfer.'
@@ -163,7 +137,7 @@ def _get(items, store, pp, successes, failures):
     if not exists(tempDir):
         mkdir(tempDir)
 
-    for filePath,key,objHash,objPath,size in items:
+    for filePath,objHash,size in items:
         pp.newItem(filePath, size)
         
         # Copy download to temp file first, and then to actual object location
@@ -171,7 +145,7 @@ def _get(items, store, pp, successes, failures):
         # in the objects cache
         (tempHandle, tempTransferFile) = mkstemp(dir=tempDir)
         osclose(tempHandle)
-        key = store.check(key)
+        key = store.check('%s/%s'%(objHash[:2], objHash[2:]))
 
         try:
             transferred = store.get(key, tempTransferFile, size)
@@ -179,37 +153,27 @@ def _get(items, store, pp, successes, failures):
             transferred = False
         if key and transferred:
             pp.updateProgress(size, size)
-            popen(['mkdir', '-p', dirname(objPath)]).wait()
-            popen(['mv', tempTransferFile, objPath]).wait()
-            popen(['cp', objPath, filePath]).wait()
+            popen(['mv', tempTransferFile, filePath]).wait()
             successes.append((filePath, objHash, size))
         else:
             pp.updateProgress(size, size, custom_item_string='ERROR')
             failures.append(filePath)
 
+    cache.insert({h:(s,f) for f,h,s in successes}, inLru=True, progressMsg='Caching newly gotten items')
+
 @gitDirOperation(repoDir)
 def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=False, quiet=False):
     commitsFile = getCommitFile()
     commitsFitData = readFitFile(commitsFile)
-    available = []
-    for filePath,(objHash, size) in commitsFitData.iteritems():
-        key = joinpath(objHash[:2], objHash[2:])
-        objPath = findObject(objHash)
-        # TODO TODO 
-        '''
-        if objPath == None:
-            print objHash
-        '''
-        available.append((filePath, key, objHash, objPath, size))
-
-    totalSize = sum([size for f,k,h,p,size in available])
+    available = [(f, o, s) for f,(o, s) in commitsFitData.iteritems()]
+    totalSize = sum([size for f,h,size in available])
 
     if len(available) == 0:
         if not quiet:
             print 'No tranfers needed! There are no cached objects to put in external location for HEAD.'
     elif showlist:
         print
-        for filePath,k,h,p,size in available:
+        for filePath,h,size in available:
             print '  %6.2fMB  %s'%(size/1048576, filePath)
         print '\nThe above objects can be tranferred (maximum total transfer size: %.2fMB).'%(totalSize/1048576)
         print 'You may run git-fit put to start the transfer.'
@@ -231,19 +195,21 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
         remove(commitsFile)
 
 def _put(items, store, pp, successes, failures):
-    for filePath,keyName,objHash,objPath,size in items:
+    cached = cache.find(o for f,o,s in items)
+    for filePath,objHash,size in items:
         pp.newItem(filePath, size)
-        if not exists(objPath):
+        if objHash not in cached:
             pp.updateProgress(size, size, custom_item_string='ERROR')
             failures.append(filePath)
             continue
 
         done = True
+        keyName = '%s/%s'%(objHash[:2], objHash[2:])
         if store.check(keyName):
             pp.updateProgress(size, size, custom_item_string='No transfer needed.')
         else:
             try:
-                transferred = store.put(objPath, keyName, size)
+                transferred = store.put(cached[objHash], keyName, size)
             except:
                 transferred = False
             if transferred:
@@ -254,6 +220,8 @@ def _put(items, store, pp, successes, failures):
                 failures.append(filePath)
         if done:
             successes.append((filePath, objHash, size))
+
+    cache.enque(o for f,o,s in successes)
 
 def _transfer(method, items, size, fitTrackedData, successes, quiet):
     pp = _QuietProgressPrinter() if quiet else _ProgressPrinter()
@@ -272,50 +240,17 @@ def _transfer(method, items, size, fitTrackedData, successes, quiet):
     pp.done()
     store.close()
     print
-    updateLRUCache(successes, fitTrackedData)
 
     if len(failures) > 0:
         print 'Some items could not be transferred:'
         print '\n'.join(failures)
         print 'Above items could not be transferred:'
 
-def updateLRUCache(objects, fitTrackedData):
-    lru = readCacheFile()
-    # lru is a queue, so append most recent to end of list
-    lru.append([(h,s) for f,h,s in objects])
-
     fitSize = getFitSize(fitTrackedData)
-    cacheSize = getCacheSize(lru)
+    cacheSize = cache.size()
     if cacheSize > fitSize * 2:
-        print 'Cache size (%.2fMB) is larger than twice the tracked size (%.2fMB).'%(cacheSize/1048576., fitSize/1048576.)
+        print 'Cache size (%.2fMB) is larger than twice the tracked size (%.2fMB). Pruning...'%(cacheSize/1048576., fitSize/1048576.)
+        cache.prune(fitSize * 2)
     else:
         print 'Cache size is %.2fMB and tracked size is %.2fMB (will not prune at this time).'%(cacheSize/1048576., fitSize/1048576.)
-
-    # objects being added to this commit might already exist
-    # in cache as part of other commit, so for each lru entry,
-    # clear the objects list and recreate it
-    print 'Updating cache file...',
-    objRevMap = {}
-    for i, objList in enumerate(lru):
-        lru[i] = []
-        for o,s in objList:
-            objRevMap[(o,s)] = i
-
-    for o,i in objRevMap.iteritems():
-        lru[i].append(o)
-
-    # keep cache size less than twice the size of fit-tracked data
-    if cacheSize > fitSize * 2:
-        print '\nPruning cache...',
-        while cacheSize > fitSize * 2:
-            if len(lru) == 0:
-                break
-            objects = lru.pop(0)
-            if len(objects) == 0:
-                continue
-            objects, sizes = zip(*objects)
-            removeObjects(objects)
-            cacheSize -= sum(sizes)
-
-    writeCacheFile(lru)
-    print 'Done.'
+        

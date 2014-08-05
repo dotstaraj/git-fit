@@ -7,6 +7,7 @@ from textwrap import fill as wrapline
 from os import remove, mkdir, devnull
 from os.path import join as joinpath, exists
 from shutil import move
+import cache
 
 # This msg string should be left exactly as it is in the multi-line string
 infoMsg='''
@@ -71,7 +72,9 @@ def postCommit():
     fitFileHash = fitFileHash.split()[2]
     savesFile = joinpath(savesDir, fitFileHash)
     if exists(savesFile):
+        cache.commit({h for f,(h,s) in readFitFile(savesFile).iteritems()})
         move(savesFile, getCommitFile())
+
 
     # 1 notify warning if un-committed changes exist
     # 2 Notify warning to unignore items that were untracked in the commit

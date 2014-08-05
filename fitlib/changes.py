@@ -2,9 +2,9 @@
 from . import fitFile, gitDirOperation, repoDir, savesDir, workingDir
 from . import updateStats, refreshStats, addedStatFile, writeFitFile, readFitFile
 from . import filterBinaryFiles, getStagedFitFileHash, getFitFileStatus
-from objects import findObject, placeObjects, removeObjects, getUpstreamItems, getDownstreamItems
+from objects import getUpstreamItems, getDownstreamItems
 from paths import getValidFitPaths
-import merge
+import merge, cache
 from subprocess import Popen as popen, PIPE
 from os.path import exists, dirname, join as joinpath
 from os import remove, makedirs, stat, listdir, mkdir
@@ -110,7 +110,6 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
         print 'Nothing to show (no problems or changes detected).'
         return
 
-    print
     if any(len(l) > 0 for l in [modified,added,removed,untracked,unchanged,conflict,binary]):
         print
         for c,f in sorted(untracked+modified+added+removed+conflict+binary+unchanged, key=lambda i: i[1]):
@@ -132,7 +131,6 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
     if len(downstream) > 0:
         print ' * %d object(s) need to be downloaded. Run \'git-fit get\' -s for details.'%len(downstream)
 
-    print
 
 @gitDirOperation(repoDir)
 def getTrackedItems():
@@ -232,10 +230,10 @@ def restoreItems(fitTrackedData, modified, added, removed, quiet=False):
     missing = 0
     touched = {}
 
-    result = _restorePopulate('Added', sorted(removed), fitTrackedData, quiet=quiet)
+    result = _restoreFromCache('Added', sorted(removed), fitTrackedData, quiet=quiet)
     touched.update(result[0])
     missing += result[1]
-    result = _restorePopulate('Restored', sorted(modified), fitTrackedData, quiet=quiet)
+    result = _restoreFromCache('Restored', sorted(modified), fitTrackedData, quiet=quiet)
     touched.update(result[0])
     missing += result[1]
 
@@ -243,18 +241,18 @@ def restoreItems(fitTrackedData, modified, added, removed, quiet=False):
 
     return missing
 
-def _restorePopulate(restoreType, objects, fitTrackedData, quiet=False):
+def _restoreFromCache(restoreType, objects, fitTrackedData, quiet=False):
     missing = 0
     touched = {}
+    cached = cache.find(fitTrackedData[f][0] for f in objects)
     for filePath in objects:
         objHash = fitTrackedData[filePath][0]
-        objPath = findObject(objHash)
         fileDir = dirname(filePath)
         fileDir and (exists(fileDir) or makedirs(fileDir))
-        if objPath:
+        if objHash in cached:
             if not quiet:
                 print '%s: %s'%(restoreType, filePath)
-            copyfile(objPath, filePath)
+            copyfile(cached[objHash], filePath)
             touched[filePath] = objHash
         else:
             if not quiet:
@@ -293,7 +291,7 @@ def save(fitTrackedData, paths=None, pathArgs=None, forceWrite=False, quiet=Fals
     print 'Staged .fit file.'
 
     if oldStagedFitFileHash != newStagedFitFileHash:
-        _saveCache(added, fitTrackedData, newStagedFitFileHash)
+        _saveToCache(added, fitTrackedData, newStagedFitFileHash)
 
     return True
 
@@ -318,34 +316,20 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
 
     return modified,removed,stubs
 
-def _saveCache(newItems, fitTrackedData, fitFileHash):
-    if not exists(savesDir):
-        mkdir(savesDir)
-
+def _saveToCache(newItems, fitTrackedData, fitFileHash):
     toAdd = dict(newItems)
     toRemove = set()
+
     for l in listdir(savesDir):
         savesFile = joinpath(savesDir, l)
         oldSaveItems = readFitFile(savesFile)
         for i,f in oldSaveItems.iteritems():
             if fitTrackedData.get(i) == f:
-                if i in newItems:
-                    del newItems[i]
-                else:
-                    toAdd[i] = f
+                toAdd[i] = f
             else:
                 toRemove.add(f[0])
         remove(savesFile)
 
-    removeObjects(toRemove - set(toAdd))
-
-    numNewItems = len(newItems)
-    numDigits = str(len(str(numNewItems)+''))
-    progress_fmt = '\rCaching new and modified items...%6.2f%%  '+'%'+numDigits+'s/%'+numDigits+'s'
-    def progress(i):
-        print progress_fmt%(i*100./numNewItems, i, numNewItems),
-        stdout.flush()
-    existing = placeObjects(((h,f) for f,(h,s) in newItems.iteritems()), progressCallback=progress)
-    print '\r'+(' '*(43+int(numDigits)*2))+'\r',
-
     writeFitFile(toAdd, joinpath(savesDir,fitFileHash))
+    cache.delete(toRemove - {toAdd[i][0] for i in toAdd})
+    cache.insert({h:(s,f) for f,(h,s) in newItems.iteritems()}, progressMsg='Caching new and modified items')

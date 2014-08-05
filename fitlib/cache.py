@@ -4,15 +4,15 @@ from os import remove, makedirs
 from os.path import exists
 from shutil import copyfile
 
-def _cacheIO(f):
+def _cacheIO(decoratee):
     def decorator(*a, **k):
         loaded = False
 
-        if k['data'] == None:
+        if k.get('data') == None:
             loaded = True
-            k['data'] = load(open(lruFile)) if path.exists(lruFile) else {'lru':{'size':0,'count':0,'items':{}},'map':{'size':0,'items':{}}}
+            k['data'] = load(open(lruFile)) if exists(lruFile) else {'lru':{'size':0,'count':0,'items':{}},'map':{'size':0,'items':{}}}
 
-        updated, r = f(*a, **k)
+        updated, r = decoratee(*a, **k)
 
         if loaded and updated:
             f = open(lruFile, 'w')
@@ -20,6 +20,7 @@ def _cacheIO(f):
             f.close()
 
         return r
+    return decorator
 
 def _unpack(data):
     l = data['lru']
@@ -32,7 +33,7 @@ def _pack(data, ls, lc, ms):
     l['size'], l['count'], m['size'] = ls, lc, ms
 
 @_cacheIO
-def insert(keys, inLru=False, data=None):
+def insert(keys, inLru=False, progressMsg=None, data=None):
     ls, lc, li, ms, mi = _unpack(data)
 
     inserted = {}
@@ -55,14 +56,21 @@ def insert(keys, inLru=False, data=None):
                 li[k] = (s,lc)
             elif k not in mi:
                 inserted[k] = f
-                mi[k] = (k, False)
+                mi[k] = (s, False)
                 ms += s
 
-    for k,f in inserted.iteritems():
+    n = len(inserted)
+    for i,(k,f) in enumerate(inserted.iteritems()):
         dstDir = '%s/%s'%(objectsDir, k[:2])
         dst = '%s/%s'%(dstDir, k[2:])
         exists(dstDir) or makedirs(dstDir)
         copyfile(f, dst)
+        if progressMsg:
+            print '\r%s...%6.2f%%  %s/%s           '%(progressMsg,i*100./n, i, n),
+            stdout.flush()
+
+    if progressMsg:
+        print
 
     _pack(data, ls, lc, ms)
     return True, (inserted, inOther, ls, ms)
@@ -105,25 +113,25 @@ def enque(keys, data=None):
     return len(enqued) > 0, (enqued, fromMap)
 
 @_cacheIO
-def find(keys, inMap=True, data=None):
+def find(keys, inMap=True, update=True, data=None):
     ls, lc, li, ms, mi = _unpack(data)
     if inMap:
         return False, {k:mi[k] for k in keys if k in mi}
 
     inLru = False
     found = {}
-    for k in keys
+    for k in keys:
         if k in li:
             inLru = True
             lc += 1
             val = li[k][0]
             li[k] = (val, lc)
-            found[k] = val
+            found[k] = '%s/%s/%s'%(objectsDir, k[:2], k[2:])
         elif k in mi:
-            found[k] = mi[k][0]
+            found[k] = '%s/%s/%s'%(objectsDir, k[:2], k[2:])
 
     _pack(data, ls, lc, ms)
-    return inLru, found
+    return inLru and update, found
 
 @_cacheIO
 def delete(keys, commits=False, data=None):
@@ -166,3 +174,7 @@ def prune(size, data=None):
 @_cacheIO
 def size(data=None):
     return False, (data['lru']['size'], data['map']['size'])
+
+@_cacheIO
+def getCommittedObjects(data=None):
+    return {h for h,(s,c) in data['map']['items'] if c}
