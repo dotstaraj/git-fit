@@ -110,6 +110,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
         print 'Nothing to show (no problems or changes detected).'
         return
 
+    print
     if any(len(l) > 0 for l in [modified,added,removed,untracked,unchanged,conflict,binary]):
         print
         for c,f in sorted(untracked+modified+added+removed+conflict+binary+unchanged, key=lambda i: i[1]):
@@ -130,6 +131,8 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
         print ' * %s object(s) may need to be uploaded. Run \'git-fit put\' -s for details.'%len(upstream)
     if len(downstream) > 0:
         print ' * %d object(s) need to be downloaded. Run \'git-fit get\' -s for details.'%len(downstream)
+
+    print
 
 @gitDirOperation(repoDir)
 def getTrackedItems():
@@ -320,7 +323,7 @@ def _saveCache(newItems, fitTrackedData, fitFileHash):
         mkdir(savesDir)
 
     toAdd = dict(newItems)
-    toRemove = []
+    toRemove = set()
     for l in listdir(savesDir):
         savesFile = joinpath(savesDir, l)
         oldSaveItems = readFitFile(savesFile)
@@ -331,11 +334,10 @@ def _saveCache(newItems, fitTrackedData, fitFileHash):
                 else:
                     toAdd[i] = f
             else:
-                toRemove.append(f[0])
+                toRemove.add(f[0])
         remove(savesFile)
 
-    writeFitFile(toAdd, joinpath(savesDir,fitFileHash))
-    removeObjects(toRemove)
+    removeObjects(toRemove - set(toAdd))
 
     numNewItems = len(newItems)
     numDigits = str(len(str(numNewItems)+''))
@@ -343,5 +345,7 @@ def _saveCache(newItems, fitTrackedData, fitFileHash):
     def progress(i):
         print progress_fmt%(i*100./numNewItems, i, numNewItems),
         stdout.flush()
-    placeObjects(((h,f) for f,(h,s) in newItems.iteritems()), progressCallback=progress)
+    existing = placeObjects(((h,f) for f,(h,s) in newItems.iteritems()), progressCallback=progress)
     print '\r'+(' '*(43+int(numDigits)*2))+'\r',
+
+    writeFitFile(toAdd, joinpath(savesDir,fitFileHash))

@@ -28,15 +28,15 @@ workingDir = getcwd()
 gitDir = popen('git rev-parse --git-dir'.split(), stdout=PIPE).communicate()[0].strip()
 fitDir = path.join(gitDir,'fit')
 fitFile = path.join(repoDir, '.fit')
-cacheDir = path.join(fitDir, 'objects')
-savesDir = path.join(fitDir, 'saves')
-commitsDir = path.join(fitDir, 'commits')
+cacheDir = path.join(fitDir, 'cache')
+objectsDir = path.join(cacheDir, 'objects')
+savesDir = path.join(cacheDir, 'saves')
+commitsDir = path.join(cacheDir, 'commits')
+lruFile = path.join(cacheDir, 'lru')
 statFile = path.join(fitDir, 'stat')
 addedStatFile = path.join(fitDir, 'stat.added')
 mergeMineFitFile = path.join(fitDir, 'merge-mine')
 mergeOtherFitFile = path.join(fitDir, 'merge-other')
-firstTimeFile = path.join(fitDir, 'first-time')
-cacheLruFile = path.join(fitDir, 'cache-lru')
 tempDir = path.join(fitDir, 'temp')
 fitManifestItemsTempDir = path.join(fitDir, 'manifest_items_tmp')
 
@@ -223,10 +223,10 @@ def updateStats(items, filePath=statFile):
     return oldStats
 
 def readCacheFile():
-    return load(open(cacheLruFile)) if path.exists(cacheLruFile) else []
+    return load(open(lruFile)) if path.exists(lruFile) else []
 
 def writeCacheFile(lru):
-    cacheOut = open(cacheLruFile, 'wb')
+    cacheOut = open(lruFile, 'wb')
     dump(lru, cacheOut)
     cacheOut.close()
 

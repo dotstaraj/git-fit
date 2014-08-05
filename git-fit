@@ -5,14 +5,36 @@ from os import mkdir, chmod
 from os.path import dirname, realpath, join as joinpath, exists
 from sys import argv
 from subprocess import call
-from fitlib import fitDir, cacheDir, repoDir, gitDir, tempDir, commitsDir, savesDir
-from fitlib import mergeMineFitFile, readFitFile, firstTimeFile, printAsText, getHashForRevision
+from shutil import move, rmtree
+from fitlib import fitDir, cacheDir, objectsDir, repoDir, gitDir, tempDir, commitsDir, savesDir, statFile
+from fitlib import mergeMineFitFile, readFitFile, printAsText, getHashForRevision
 from fitlib import hooks, objects, merge, changes
 import stat
 
+def getFoundVersion():
+    versionFile = joinpath(fitDir, 'version')
+    return (open(versionFile).read() if exists(versionFile) else '0.0.0').split('.')
+
+def setVersionMarker():
+    versionFile = open(joinpath(fitDir, 'version'), 'w')
+    versionFile.write('.'.join(getProductVersion()))
+    versionFile.close()
+
+def getProductVersion():
+    return '0.2.0'.split('.')
+
+
 def main():
     opts = getOpts()
-    firstTimeRepoSetup(opts.no_hooks)
+
+    if getFoundVersion() < getProductVersion():
+        firstTimeRepoSetup(opts.no_hooks)
+    elif getFoundVersion() > getProductVersion():
+        print 'You are running a version of git-fit that is OLDER than the version with which'
+        print 'this repo has been used before. Please check that your PATH points to the'
+        print 'latest copy of git-fit you have on your system. git-fit will now exit...'
+        exit(1)
+
 
     if len(argv) > 1 and argv[1] in ('save', 'restore', 'get', 'put'):
         if argv[1] == 'save':
@@ -61,42 +83,33 @@ def main():
             hooks.postCheckout()
     elif opts.git == 'merge-driver':
         merged = merge.mergeDriver(*(opts.paths[:3]))
-        
+
         return exit(0 if merged else 1)
     elif opts.git == 'text-output':
         printAsText(readFitFile(opts.paths[0]))
 
-# This will be used to check whether we need to run (or re-run after changes to git-fit)
-# this first-time repo setup
-_firstTimeCounter = 0
+def firstTimeRepoSetup(noHooks=False):
+    movedStatTempPath = None
+    if exists(fitDir):
+        if exists(statFile):
+            movedStatTempPath = joinpath(gitDir, 'fit-stats')
+            move(statFile, movedStatTempPath)
+            moveStatFileBack = True
+        rmtree(fitDir)
 
-def firstTimeRepoSetup(nohooks=False):
-    global _firstTimeCounter
-    if not exists(fitDir):
-        print 'Preparing this repository for use with git-fit...'
-        mkdir(fitDir)
-        mkdir(cacheDir)
-        mkdir(commitsDir)
-        mkdir(savesDir)
-        mkdir(tempDir)
-        
-        print 'Restoring working tree with current fit items...'
-        changes.restore(readFitFile(), quiet=True)
-    elif exists(firstTimeFile):
-        firstTimeCount = int(open(firstTimeFile).read())
 
-        if firstTimeCount == _firstTimeCounter:
-            return
+    print 'Preparing this repository for use with git-fit...'
 
-        if firstTimeCount > _firstTimeCounter:
-            print 'You are running a version of git-fit that is OLDER than the version with which'
-            print 'this repo has been used before. Please check that your PATH points to the'
-            print 'latest copy of git-fit you have on your system. git-fit will now exit...'
-            exit(1)
+    mkdir(fitDir)
+    mkdir(cacheDir)
+    mkdir(objectsDir)
+    mkdir(commitsDir)
+    mkdir(savesDir)
+    mkdir(tempDir)
 
-    f = open(firstTimeFile, 'w')
-    f.write("%d"%_firstTimeCounter)
-    f.close()
+    setVersionMarker()
+    if movedStatTempPath:
+        move(movedStatTempPath, statFile)
 
     f = open(joinpath(gitDir, 'info', 'attributes'), 'w')
     f.write('\n.fit -fit merge=fitfile diff=fitfile\n')
@@ -106,20 +119,18 @@ def firstTimeRepoSetup(nohooks=False):
     f.write('\n.fit\n')
     f.close()
 
-    if nohooks:
-        return
-
     def createHook(name, args=''):
         f = open(joinpath(gitDir, 'hooks', name), 'w')
         f.write('\n$fitt --git=%s %s\n'%(name,args))
         f.close()
         chmod(joinpath(gitDir, 'hooks', name), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     
-    createHook('pre-commit')
-    createHook('post-commit')
-    createHook('post-checkout', '--git-head-change ${1} ${2} ${3}')
-    createHook('post-merge', '--git-head-change')
-    createHook('post-rewrite', '--git-head-change  ${1}')
+    if not noHooks:
+        createHook('pre-commit')
+        createHook('post-commit')
+        createHook('post-checkout', '--git-head-change ${1} ${2} ${3}')
+        createHook('post-merge', '--git-head-change')
+        createHook('post-rewrite', '--git-head-change  ${1}')
 
     cmd = '''
         git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
@@ -128,6 +139,10 @@ def firstTimeRepoSetup(nohooks=False):
         git config diff.fitfile.cachetextconv true
     '''
     call('set -e\n' + cmd, shell=True)
+
+    print 'Restoring working tree...',
+    changes.restore(readFitFile(), quiet=True)
+    print 'Done.\n'
 
 def getOpts():
     parser = None

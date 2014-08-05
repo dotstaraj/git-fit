@@ -1,5 +1,5 @@
 from . import gitDirOperation, refreshStats, getFitSize, readFitFile, writeFitFile, getCommitFile
-from . import repoDir, fitDir, cacheDir, tempDir, readCacheFile, writeCacheFile, workingDir
+from . import repoDir, fitDir, objectsDir, tempDir, readCacheFile, writeCacheFile, workingDir
 from paths import getValidFitPaths
 from subprocess import Popen as popen, PIPE
 from os.path import dirname, basename, exists, join as joinpath, getsize
@@ -27,22 +27,27 @@ def getDataStore(progressCallback):
         raise
 
 def findObject(obj):
-    path = joinpath(cacheDir, joinpath(obj[:2], obj[2:]))
+    path = joinpath(objectsDir, joinpath(obj[:2], obj[2:]))
     return path if exists(path) else None
 
 @gitDirOperation(repoDir)
 def placeObjects(objects, progressCallback=lambda x: None):
+    existing = set()
     for i, (obj, src) in enumerate(objects):
-        dst = joinpath(cacheDir, joinpath(obj[:2], obj[2:]))
+        dst = joinpath(objectsDir, joinpath(obj[:2], obj[2:]))
         if not exists(dst):
             popen(('mkdir -p %s'%dirname(dst)).split()).wait()
             popen(('cp %s %s'%(src, dst)).split()).wait()
+        else:
+            existing.add(obj)
         
         progressCallback(i)
 
+    return existing
+
 def removeObjects(objects):
     for obj in objects:
-        path = joinpath(cacheDir, joinpath(obj[:2], obj[2:]))
+        path = joinpath(objectsDir, joinpath(obj[:2], obj[2:]))
         if exists(path):
             remove(path)
 
@@ -127,7 +132,7 @@ def get(fitTrackedData, pathArgs=None, summary=False, showlist=False, quiet=Fals
                 touched[filePath] = objHash
             else:
                 key = joinpath(objHash[:2], objHash[2:])
-                needed.append((filePath, key, objHash, joinpath(cacheDir, key), size))
+                needed.append((filePath, key, objHash, joinpath(objectsDir, key), size))
 
     totalSize = sum([size for f,k,h,p,size in needed])
 
@@ -190,6 +195,11 @@ def put(fitTrackedData, pathArgs=None, force=False, summary=False,  showlist=Fal
     for filePath,(objHash, size) in commitsFitData.iteritems():
         key = joinpath(objHash[:2], objHash[2:])
         objPath = findObject(objHash)
+        # TODO TODO 
+        '''
+        if objPath == None:
+            print objHash
+        '''
         available.append((filePath, key, objHash, objPath, size))
 
     totalSize = sum([size for f,k,h,p,size in available])
