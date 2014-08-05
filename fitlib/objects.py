@@ -28,7 +28,8 @@ def getDataStore(progressCallback):
         raise
 
 def getUpstreamItems():
-    return set(f for f,(h,s) in readFitFile(getCommitFile()) if h in cache.getCommittedObjects())
+    cachedCommits = cache.getCommittedObjects()
+    return set(f for f,(h,s) in readFitFile(getCommitFile()).iteritems() if h in cachedCommits)
 
 def getDownstreamItems(fitTrackedData, paths, stats):
     cached = cache.find((fitTrackedData[p][0] for p in paths), update=False)
@@ -239,18 +240,15 @@ def _transfer(method, items, size, fitTrackedData, successes, quiet):
 
     pp.done()
     store.close()
-    print
 
     if len(failures) > 0:
-        print 'Some items could not be transferred:'
         print '\n'.join(failures)
-        print 'Above items could not be transferred:'
+        print 'Above items could not be transferred.'
 
     fitSize = getFitSize(fitTrackedData)
-    cacheSize = cache.size()
+    cacheSize = cache.size()[0]
     if cacheSize > fitSize * 2:
         print 'Cache size (%.2fMB) is larger than twice the tracked size (%.2fMB). Pruning...'%(cacheSize/1048576., fitSize/1048576.)
         cache.prune(fitSize * 2)
     else:
         print 'Cache size is %.2fMB and tracked size is %.2fMB (will not prune at this time).'%(cacheSize/1048576., fitSize/1048576.)
-        

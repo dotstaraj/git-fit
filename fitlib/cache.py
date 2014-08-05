@@ -3,6 +3,7 @@ from json import load,dump
 from os import remove, makedirs
 from os.path import exists
 from shutil import copyfile
+from sys import stdout
 
 def _cacheIO(decoratee):
     def decorator(*a, **k):
@@ -59,6 +60,8 @@ def insert(keys, inLru=False, progressMsg=None, data=None):
                 mi[k] = (s, False)
                 ms += s
 
+    if progressMsg:
+        print
     n = len(inserted)
     for i,(k,f) in enumerate(inserted.iteritems()):
         dstDir = '%s/%s'%(objectsDir, k[:2])
@@ -66,10 +69,10 @@ def insert(keys, inLru=False, progressMsg=None, data=None):
         exists(dstDir) or makedirs(dstDir)
         copyfile(f, dst)
         if progressMsg:
-            print '\r%s...%6.2f%%  %s/%s           '%(progressMsg,i*100./n, i, n),
+            print '\r%s...%6.2f%%  %s/%s           '%(progressMsg,(i+1)*100./n, i+1, n),
             stdout.flush()
 
-    if progressMsg:
+    if progressMsg and len(inserted) > 0:
         print
 
     _pack(data, ls, lc, ms)
@@ -113,10 +116,10 @@ def enque(keys, data=None):
     return len(enqued) > 0, (enqued, fromMap)
 
 @_cacheIO
-def find(keys, inMap=True, update=True, data=None):
+def find(keys, inMap=False, update=True, data=None):
     ls, lc, li, ms, mi = _unpack(data)
     if inMap:
-        return False, {k:mi[k] for k in keys if k in mi}
+        return False, {k:'%s/%s/%s'%(objectsDir, k[:2], k[2:]) for k in keys if k in mi}
 
     inLru = False
     found = {}
@@ -177,4 +180,4 @@ def size(data=None):
 
 @_cacheIO
 def getCommittedObjects(data=None):
-    return {h for h,(s,c) in data['map']['items'] if c}
+    return False, {h for h,(s,c) in data['map']['items'].iteritems() if c}
