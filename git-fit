@@ -10,6 +10,7 @@ from fitlib import fitDir, cacheDir, objectsDir, repoDir, gitDir, tempDir, commi
 from fitlib import mergeMineFitFile, readFitFile, printAsText, getHashForRevision
 from fitlib import hooks, objects, merge, changes
 import stat
+import platform
 
 def getFoundVersion():
     versionFile = joinpath(fitDir, 'version')
@@ -122,6 +123,7 @@ def firstTimeRepoSetup(noHooks=False):
     def createHook(name, noHooks=False, args=''):
         f = open(joinpath(gitDir, 'hooks', name), 'w')
         if not noHooks:
+            f.write('#!/bin/sh\n')
             f.write('\ngit-fit --git=%s %s\n'%(name,args))
         f.close()
         chmod(joinpath(gitDir, 'hooks', name), stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
@@ -133,13 +135,19 @@ def firstTimeRepoSetup(noHooks=False):
     createHook('post-merge', noHooks=noHooks, args='--git-head-change')
     createHook('post-rewrite', noHooks=noHooks, args='--git-head-change  ${1}')
 
-    cmd = '''
+    if platform.system() != "Windows":
+        cmd = '''
         git config merge.fitfile.name 'Merge driver to auto-resolve .fit file conflicts when possible'
         git config merge.fitfile.driver 'git-fit --git=merge-driver %O %A %B'
         git config diff.fitfile.textconv 'git-fit --git=text-output'
         git config diff.fitfile.cachetextconv true
-    '''
-    call('set -e\n' + cmd, shell=True)
+        '''
+        call('set -e\n' + cmd, shell=True)
+    else:
+        call('git config merge.fitfile.name "Merge driver to auto-resolve .fit file conflicts when possible"', shell=True)
+        call('git config merge.fitfile.driver "git-fit --git=merge-driver %O %A %B"', shell=True)
+        call('git config diff.fitfile.textconv "git-fit --git=text-output"', shell=True)
+        call('git config diff.fitfile.cachetextconv true', shell=True)
 
     print 'Restoring working tree...',
     changes.restore(readFitFile(), quiet=True)
