@@ -55,7 +55,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
     allItems = fitItems | trackedItems
     paths = None if not pathArgs else getValidFitPaths(pathArgs, allItems, basePath=repoDir, workingDir=workingDir)
 
-    modifiedItems, addedItems, removedItems, untrackedItems, unchangedItems, stats = getChangedItems(fitTrackedData, trackedItems=trackedItems, paths=paths)
+    modifiedItems, addedItems, removedItems, untrackedItems, unchangedItems, stats, stubs = getChangedItems(fitTrackedData, trackedItems=trackedItems, paths=paths)
 
     conflict, binary = getStagedOffenders()
     offenders = conflict | binary
@@ -104,7 +104,7 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
     fitFileStatus = getFitFileStatus()
     dirtyFit = fitFileStatus and fitFileStatus[1] != ' '
 
-    noChanges = all(len(l) == 0 for l in [modified,added,removed,untracked,unchanged,conflict,binary,upstream,downstream])
+    noChanges = all(len(l) == 0 for l in [modified,added,removed,untracked,unchanged,conflict,binary,upstream,downstream,stubs])
 
     if noChanges and not dirtyFit:
         print 'Nothing to show (no problems or changes detected).'
@@ -135,6 +135,10 @@ def printStatus(fitTrackedData, pathArgs=None, legend=True, showall=False, merge
         print ' * %s object(s) may need to be uploaded. Run \'git-fit put\' -s for details.'%len(upstream)
     if len(downstream) > 0:
         print ' * %d object(s) need to be downloaded. Run \'git-fit get\' -s for details.'%len(downstream)
+    if len(stubs) > 0:
+        print ' * %d object(s) exist in the working tree as empty zero-byte stubs.'%len(stubs)
+        print '   These objects are locally cached, so running \'git-fit restore\' will replace'
+        print '   them with their actual contents.'
 
 
 @gitDirOperation(repoDir)
@@ -178,11 +182,11 @@ def getChangedItems(fitTrackedData, trackedItems=None, paths=None, pathArgs=None
 
     # Check all existing items for modification by comparing their expected
     # hash sums (those stored in the .fit file) to their new, actual hash sums.
-    stats = updateStats(existingItems)
+    stats, stubs = updateStats(existingItems)
     modifiedItems = {i: [h,s[0]] for i,(h,s) in stats.iteritems() if h != fitTrackedData[i][0]}
     unchangedItems = existingItems - set(modifiedItems)
 
-    return modifiedItems, newItems, removedItems, untrackedItems, unchangedItems, stats
+    return modifiedItems, newItems, removedItems, untrackedItems, unchangedItems, stats, stubs
 
 @gitDirOperation(repoDir)
 def getStagedOffenders():
@@ -206,7 +210,7 @@ def getStagedOffenders():
 
 @gitDirOperation(repoDir)
 def checkForChanges(fitTrackedData, paths=None, pathArgs=None):
-    changes = getChangedItems(fitTrackedData, paths=paths, pathArgs=pathArgs)[:-2]
+    changes = getChangedItems(fitTrackedData, paths=paths, pathArgs=pathArgs)[:-3]
     if not any(changes):
         return
     
@@ -310,8 +314,7 @@ def saveItems(fitTrackedData, paths=None, pathArgs=None, quiet=False):
     
     modified, added, removed, untracked = changes
 
-    stats = updateStats(added, filePath=addedStatFile)
-    stubs = set(added) - set(stats)
+    stats, stubs = updateStats(added, filePath=addedStatFile)
     modified.update((i,[h,s[0]]) for i,(h,s) in stats.iteritems())
     removed |= untracked
 

@@ -199,10 +199,13 @@ def refreshStats(items, filePath=statFile):
 def updateStats(items, filePath=statFile):
     oldStats = readStatFile(filePath=filePath)
     newStats = {}
+    stubs = []
     for i in items:
         stats = fitStats(i)
         if stats[0] > 0:
             newStats[i] = stats
+        else:
+            stubs.append(i)
 
     # An item is "touched" if its cached stats don't match its new stats.
     # "Touched" is a necessary but not sufficient condition for an item to
@@ -223,7 +226,7 @@ def updateStats(items, filePath=statFile):
     if statsUpdated:
         writeStatFile(oldStats, filePath=filePath)
 
-    return oldStats
+    return oldStats, stubs
 
 def getFitSize(fitTrackedData):
     return sum(int(s) for p,(h,s) in fitTrackedData.iteritems())
