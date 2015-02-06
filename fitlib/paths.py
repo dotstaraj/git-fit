@@ -1,6 +1,6 @@
 #!/usr/bin/env python2.7
 
-from os.path import dirname, realpath, relpath, join as joinpath
+from os.path import dirname, realpath, relpath, join as joinpath, sep as pathSeparator
 
 class FitNode:
     def __init__(self, path, nodes):
@@ -53,9 +53,10 @@ def _addFitItemsToList(path, node, items):
     while len(nodes) > 0:
         node = nodes.pop(0)
         if len(node.children) == 0:
-            items.add(node.parentPath)
+            #Replacement of '\\' is needed(Windows) since cache is already formed and it has paths in UNIX format
+            items.add(node.parentPath.replace('\\', '/'))
         else:
-            nodes.extend([FitNode(node.parentPath + '/' + k, v) for k,v in node.children.iteritems()])            
+            nodes.extend([FitNode(node.parentPath.replace('\\', '/') + '/' + k, v) for k,v in node.children.iteritems()])
 
 def getValidFitPaths(given, available, basePath='', workingDir=''):
     if not given:
@@ -68,7 +69,7 @@ def getValidFitPaths(given, available, basePath='', workingDir=''):
 
     # Generate list of individual fit items under user-given paths
     for p in given:
-        if p.startswith('../'):
+        if p.startswith('..' + pathSeparator):
             print '(...skipping path not under repo: %s)'%p
             continue
 
@@ -76,7 +77,7 @@ def getValidFitPaths(given, available, basePath='', workingDir=''):
         # is tracked by fit by traversing fitPathTree
         isFit = True
         node = fitPathTree
-        parts = p.split('/')
+        parts = p.split(pathSeparator)
         for part in parts:
             node = node.get(part)
             if node == None:
